@@ -1,0 +1,226 @@
+package com.csa.minecraft.player;
+
+import com.csa.minecraft.GameMode;
+import com.csa.minecraft.Settings;
+import com.csa.minecraft.engine.Camera;
+import com.csa.minecraft.engine.Input;
+import com.csa.minecraft.render.BlockEffectsRenderer;
+import com.csa.minecraft.world.Block;
+import com.csa.minecraft.world.World;
+import org.joml.Vector3f;
+
+import static org.lwjgl.glfw.GLFW.*;
+
+public class Player {
+    public static final float WIDTH = 0.6f, HEIGHT = 1.8f, EYE = 1.6f;
+    public static final float SPEED = 5.0f, FLY_SPEED = 12.0f, JUMP = 9.0f, GRAVITY = 28.0f;
+    public static final float REACH = 6.0f;
+    private static final float CREATIVE_FLY_TAP_WINDOW = 0.28f;
+
+    private final Vector3f pos;
+    private final Vector3f vel = new Vector3f();
+    private float yaw = 0, pitch = 0;
+    private boolean onGround = false;
+    private boolean fly = false;
+    private float creativeFlyTapTimer = 0f;
+    private GameMode lastMode;
+    private int breakX, breakY, breakZ;
+    private float breakTimer = 0f;
+    private float breakDuration = 1f;
+    private boolean breakingBlock = false;
+    private final Inventory inv = new Inventory();
+    private final Settings settings;
+
+    public Player(Vector3f start) { this(start, new Settings()); }
+    public Player(Vector3f start, Settings settings) {
+        this.pos = start;
+        this.settings = settings;
+        this.lastMode = settings.gameMode;
+    }
+    public Vector3f position() { return pos; }
+    public Inventory inventory() { return inv; }
+    public Settings settings() { return settings; }
+
+    public void update(float dt, Input input, World world) {
+        update(dt, input, world, null);
+    }
+
+    public void update(float dt, Input input, World world, BlockEffectsRenderer effects) {
+        // mouse look
+        float sens = settings.mouseSensitivity;
+        float pitchSign = settings.invertY ? 1f : -1f;
+        yaw -= input.mouseDX() * sens;
+        pitch += input.mouseDY() * sens * pitchSign;
+        pitch = Math.max(-89f, Math.min(89f, pitch));
+
+        GameMode mode = settings.gameMode;
+        if (mode != lastMode) {
+            fly = mode == GameMode.SPECTATOR;
+            creativeFlyTapTimer = 0f;
+            vel.zero();
+            lastMode = mode;
+        }
+        boolean creative = mode == GameMode.CREATIVE;
+        boolean spectator = mode == GameMode.SPECTATOR;
+        if (!creative) creativeFlyTapTimer = 0f;
+        else creativeFlyTapTimer = Math.max(0f, creativeFlyTapTimer - dt);
+
+        // hotbar select
+        for (int i = 0; i < 9; i++) {
+            if (input.keyPressed(GLFW_KEY_1 + i)) inv.selected = i;
+        }
+        boolean jumpPressed = input.keyPressed(GLFW_KEY_SPACE);
+        boolean jumpConsumedByFlyToggle = false;
+        if (creative && jumpPressed) {
+            if (creativeFlyTapTimer > 0f) {
+                fly = !fly;
+                vel.y = 0f;
+                onGround = false;
+                creativeFlyTapTimer = 0f;
+                jumpConsumedByFlyToggle = true;
+            } else {
+                creativeFlyTapTimer = CREATIVE_FLY_TAP_WINDOW;
+            }
+        }
+        if (spectator) fly = true;
+        if (mode == GameMode.SURVIVAL) fly = false;
+
+        // movement direction
+        float yawR = (float) Math.toRadians(yaw);
+        Vector3f forward = spectator
+            ? lookDir()
+            : new Vector3f((float)-Math.sin(yawR), 0, (float)-Math.cos(yawR));
+        Vector3f right = new Vector3f((float)Math.cos(yawR), 0, (float)-Math.sin(yawR));
+        Vector3f wish = new Vector3f();
+        if (input.key(GLFW_KEY_W)) wish.add(forward);
+        if (input.key(GLFW_KEY_S)) wish.sub(forward);
+        if (input.key(GLFW_KEY_D)) wish.add(right);
+        if (input.key(GLFW_KEY_A)) wish.sub(right);
+        if (wish.lengthSquared() > 0) wish.normalize();
+        float speed = spectator ? FLY_SPEED * 1.35f : (fly ? FLY_SPEED : SPEED);
+        vel.x = wish.x * speed;
+        vel.y = spectator ? wish.y * speed : vel.y;
+        vel.z = wish.z * speed;
+
+        if (fly) {
+            if (!spectator) vel.y = 0;
+            if (input.key(GLFW_KEY_SPACE)) vel.y += speed;
+            if (input.key(GLFW_KEY_LEFT_SHIFT)) vel.y -= speed;
+        } else {
+            vel.y -= GRAVITY * dt;
+            if (onGround && jumpPressed && !jumpConsumedByFlyToggle) {
+                vel.y = JUMP;
+                onGround = false;
+            }
+        }
+
+        if (spectator) {
+            pos.add(new Vector3f(vel).mul(dt));
+            onGround = false;
+        } else {
+            Physics.moveAndCollide(this, world, dt);
+        }
+
+        // mouse interaction
+        Vector3f eye = new Vector3f(pos.x, pos.y + EYE, pos.z);
+        Vector3f dir = lookDir();
+        if (!spectator && creative && input.leftClick() && input.cursorGrabbed()) {
+            Raycaster.Hit h = Raycaster.cast(world, eye, dir, REACH);
+            if (h != null) destroyBlock(world, effects, h.x, h.y, h.z);
+        } else if (!spectator && mode == GameMode.SURVIVAL && input.leftDown() && input.cursorGrabbed()) {
+            updateSurvivalBreaking(dt, world, effects, eye, dir);
+        } else {
+            clearBreaking();
+        }
+        if (!spectator && input.rightClick() && input.cursorGrabbed()) {
+            Raycaster.Hit h = Raycaster.cast(world, eye, dir, REACH);
+            if (h != null) {
+                // don't place inside player
+                if (!intersectsPlayer(h.px, h.py, h.pz))
+                    world.setBlock(h.px, h.py, h.pz, inv.selectedBlock());
+            }
+        }
+    }
+
+    public boolean isOnGround() { return onGround; }
+    public void setOnGround(boolean g) { onGround = g; }
+    public Vector3f velocity() { return vel; }
+    public boolean isBreakingBlock() { return breakingBlock; }
+    public int breakingX() { return breakX; }
+    public int breakingY() { return breakY; }
+    public int breakingZ() { return breakZ; }
+    public float breakProgress() {
+        return breakingBlock ? Math.max(0f, Math.min(1f, breakTimer / breakDuration)) : 0f;
+    }
+
+    public Vector3f lookDir() {
+        float yawR = (float) Math.toRadians(yaw);
+        float pitchR = (float) Math.toRadians(pitch);
+        return new Vector3f(
+            (float)(-Math.sin(yawR) * Math.cos(pitchR)),
+            (float) Math.sin(pitchR),
+            (float)(-Math.cos(yawR) * Math.cos(pitchR))
+        ).normalize();
+    }
+
+    public Camera camera(float aspect) {
+        Vector3f eye = new Vector3f(pos.x, pos.y + EYE, pos.z);
+        return new Camera(eye, lookDir(), settings.fov, aspect, 0.1f, 500f);
+    }
+
+    private boolean intersectsPlayer(int bx, int by, int bz) {
+        float minX = pos.x - WIDTH/2, maxX = pos.x + WIDTH/2;
+        float minY = pos.y,           maxY = pos.y + HEIGHT;
+        float minZ = pos.z - WIDTH/2, maxZ = pos.z + WIDTH/2;
+        return bx + 1 > minX && bx < maxX && by + 1 > minY && by < maxY && bz + 1 > minZ && bz < maxZ;
+    }
+
+    private void updateSurvivalBreaking(float dt, World world, BlockEffectsRenderer effects,
+                                        Vector3f eye, Vector3f dir) {
+        Raycaster.Hit h = Raycaster.cast(world, eye, dir, REACH);
+        if (h == null) {
+            clearBreaking();
+            return;
+        }
+        Block block = world.getBlock(h.x, h.y, h.z);
+        if (block == Block.AIR) {
+            clearBreaking();
+            return;
+        }
+        if (!breakingBlock || h.x != breakX || h.y != breakY || h.z != breakZ) {
+            breakX = h.x;
+            breakY = h.y;
+            breakZ = h.z;
+            breakTimer = 0f;
+            breakDuration = hardness(block);
+            breakingBlock = true;
+        }
+        breakTimer += dt;
+        if (breakTimer >= breakDuration) {
+            destroyBlock(world, effects, breakX, breakY, breakZ);
+            clearBreaking();
+        }
+    }
+
+    private void destroyBlock(World world, BlockEffectsRenderer effects, int x, int y, int z) {
+        Block block = world.getBlock(x, y, z);
+        if (block == Block.AIR) return;
+        if (effects != null) effects.spawnBlockBreak(x, y, z, block);
+        world.setBlock(x, y, z, Block.AIR);
+    }
+
+    private void clearBreaking() {
+        breakingBlock = false;
+        breakTimer = 0f;
+    }
+
+    private float hardness(Block block) {
+        return switch (block) {
+            case LEAVES, GLASS -> 0.45f;
+            case DIRT, GRASS, SAND -> 0.75f;
+            case WOOD, PLANKS -> 1.15f;
+            case STONE -> 1.55f;
+            default -> 1.0f;
+        };
+    }
+}
