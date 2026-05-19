@@ -69,8 +69,22 @@ public class WorldRenderer {
         uniform float uSunIntensity;
         uniform float uWetness;
         uniform float uRain;
+        uniform float uTime;
+        uniform float uUnderwater;
+        uniform int uRenderPass;
         void main(){
-            vec4 c = texture(uAtlas, vUV);
+            float blockWater = 1.0 - smoothstep(0.25, 0.75, abs(vBlock - 11.0));
+            float blockGlass = 1.0 - smoothstep(0.25, 0.75, abs(vBlock - 8.0));
+            float transparent = max(blockWater, blockGlass);
+            if (uRenderPass == 0 && transparent > 0.5) discard;
+            if (uRenderPass == 1 && transparent < 0.5) discard;
+
+            vec2 uv = vUV;
+            uv += blockWater * vec2(
+                sin(vWorldPos.x * 2.1 + uTime * 1.3) * 0.0035,
+                cos(vWorldPos.z * 2.4 - uTime * 1.1) * 0.0035
+            );
+            vec4 c = texture(uAtlas, uv);
             if (c.a < 0.1) discard;
             vec3 N = normalize(vWorldNormal);
             vec3 V = normalize(uCamPos - vWorldPos);
@@ -81,7 +95,8 @@ public class WorldRenderer {
             float skyFacing = N.y * 0.5 + 0.5;
             float ao = mix(0.55, 1.0, vAO * vAO);
             float topWet = step(0.55, N.y) * uWetness;
-            float glass = step(7.5, vBlock);
+            float glass = blockGlass;
+            float water = blockWater;
             float leaf = 1.0 - smoothstep(0.3, 0.8, abs(vBlock - 5.0));
 
             vec3 skyBounce = mix(uFogColor, uSkyTop, skyFacing) * (0.13 + 0.15 * skyFacing);
@@ -96,14 +111,20 @@ public class WorldRenderer {
             vec3 R = reflect(-V, N);
             vec3 env = mix(uFogColor, uSkyTop, clamp(R.y * 0.5 + 0.5, 0.0, 1.0));
             lit = mix(lit, lit * 0.82 + env * 0.48, glass * (0.35 + 0.35 * fresnel));
+            vec3 waterTint = vec3(0.10, 0.34, 0.78);
+            vec3 waterLit = c.rgb * (ambient * 0.85 + diffuse * 0.34) + env * (0.18 + fresnel * 0.28) + waterTint * 0.16;
+            lit = mix(lit, waterLit, water);
             lit += uSunColor * spec * (0.7 + uSunIntensity);
             lit += leaf * vec3(0.03, 0.08, 0.03) * max(dot(-N, L), 0.0);
             lit = mix(lit, lit * vec3(0.82, 0.88, 0.94), uRain * 0.35);
+            lit = mix(lit, lit * vec3(0.50, 0.78, 1.10) + vec3(0.00, 0.04, 0.12), uUnderwater);
             vec3 mapped = lit / (lit + vec3(0.62));
             lit = mix(lit * 0.86, mapped, 0.25 + uRain * 0.65);
             lit = pow(max(lit, vec3(0.0)), vec3(0.88));
             float fog = clamp((vDist - uFogStart) / max(0.0001, uFogEnd - uFogStart), 0.0, 1.0);
-            fragColor = vec4(mix(lit, uFogColor, fog), c.a);
+            fog = mix(fog, clamp(vDist / 34.0, 0.0, 1.0), uUnderwater);
+            float alpha = mix(c.a, 0.38 + fresnel * 0.18, water);
+            fragColor = vec4(mix(lit, uFogColor, fog), alpha);
         }
         """;
 
@@ -167,10 +188,10 @@ public class WorldRenderer {
         }, new int[]{2});
     }
 
-    public void render(World world, Camera cam, Environment env, int width, int height) {
+    public void render(World world, Camera cam, Environment env, int width, int height, boolean underwater) {
         double t = System.currentTimeMillis() * 0.001;
         Vector3f sunWorld = sunDirection(t);
-        renderSky(cam, env, sunWorld, width, height, (float) t);
+        renderSky(cam, env, sunWorld, width, height, (float) t, underwater);
 
         shader.use();
         shader.setMat4("uView", cam.view);
@@ -183,8 +204,8 @@ public class WorldRenderer {
         float fogStart = Math.max(0f, farBlocks - 1.5f * Chunk.SX);
         shader.setFloat("uFogStart", fogStart);
         shader.setFloat("uFogEnd", farBlocks);
-        Vector3f fog = env.fogColor();
-        Vector3f skyTop = env.skyTop();
+        Vector3f fog = underwater ? new Vector3f(0.04f, 0.22f, 0.42f) : env.fogColor();
+        Vector3f skyTop = underwater ? new Vector3f(0.02f, 0.16f, 0.34f) : env.skyTop();
         shader.setVec3("uFogColor", fog.x, fog.y, fog.z);
         shader.setVec3("uSkyTop", skyTop.x, skyTop.y, skyTop.z);
 
@@ -197,8 +218,25 @@ public class WorldRenderer {
         shader.setFloat("uSunIntensity", env.sunIntensity());
         shader.setFloat("uWetness", env.wetness());
         shader.setFloat("uRain", env.rainStrength());
+        shader.setFloat("uTime", (float) t);
+        shader.setFloat("uUnderwater", underwater ? 1f : 0f);
 
         Matrix4f model = new Matrix4f();
+        shader.setInt("uRenderPass", 0);
+        glDisable(GL_BLEND);
+        glDepthMask(true);
+        drawChunks(world, model);
+
+        shader.setInt("uRenderPass", 1);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(false);
+        drawChunks(world, model);
+        glDepthMask(true);
+        glDisable(GL_BLEND);
+    }
+
+    private void drawChunks(World world, Matrix4f model) {
         for (Chunk c : world.loaded()) {
             if (c.dirty) ChunkMesher.rebuild(c, world);
             if (c.mesh == null || c.mesh.vertexCount() == 0) continue;
@@ -208,12 +246,16 @@ public class WorldRenderer {
         }
     }
 
-    private void renderSky(Camera cam, Environment env, Vector3f sunWorld, int width, int height, float time) {
+    public void render(World world, Camera cam, Environment env, int width, int height) {
+        render(world, cam, env, width, height, false);
+    }
+
+    private void renderSky(Camera cam, Environment env, Vector3f sunWorld, int width, int height, float time, boolean underwater) {
         glDisable(GL_DEPTH_TEST);
         glDepthMask(false);
         skyShader.use();
-        Vector3f top = env.skyTop();
-        Vector3f horizon = env.skyHorizon();
+        Vector3f top = underwater ? new Vector3f(0.02f, 0.16f, 0.34f) : env.skyTop();
+        Vector3f horizon = underwater ? new Vector3f(0.04f, 0.24f, 0.45f) : env.skyHorizon();
         skyShader.setVec3("uSkyTop", top.x, top.y, top.z);
         skyShader.setVec3("uSkyHorizon", horizon.x, horizon.y, horizon.z);
         Vector4f sunClip = new Vector4f(

@@ -47,9 +47,12 @@ class TerrainGeneratorTest {
                 int h = g.heightAt(c.worldX(x), c.worldZ(z));
                 assertTrue(c.get(x, h, z).solid,
                     "top of column should be solid at " + x + "," + h + "," + z);
-                // The first cell above the heightmap should be AIR unless a tree dropped a
-                // trunk or leaves there; we check a safe margin above where no tree reaches.
-                assertEquals(Block.AIR, c.get(x, Math.min(Chunk.SY - 1, h + 12), z),
+                if (h < TerrainGenerator.SEA_LEVEL) {
+                    assertEquals(Block.WATER, c.get(x, TerrainGenerator.SEA_LEVEL, z),
+                        "ocean columns should be filled to sea level");
+                }
+                // Well above terrain/sea level should be AIR unless a tree reaches there.
+                assertEquals(Block.AIR, c.get(x, Math.min(Chunk.SY - 1, Math.max(h, TerrainGenerator.SEA_LEVEL) + 12), z),
                     "well above terrain should be AIR");
             }
     }

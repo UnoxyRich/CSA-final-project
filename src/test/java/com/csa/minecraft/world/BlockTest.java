@@ -20,7 +20,7 @@ class BlockTest {
     @Test
     void allNonAirBlocksAreSolid() {
         for (Block b : Block.values()) {
-            if (b == Block.AIR) continue;
+            if (b == Block.AIR || b == Block.WATER) continue;
             assertTrue(b.solid, b + " should be solid");
         }
     }

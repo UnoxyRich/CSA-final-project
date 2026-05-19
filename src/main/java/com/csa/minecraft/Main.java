@@ -82,11 +82,11 @@ public class Main {
             }
 
             glViewport(0, 0, window.width(), window.height());
-            Vector3f fog = environment.fogColor();
+            Vector3f fog = player.isUnderwater() ? new Vector3f(0.04f, 0.22f, 0.42f) : environment.fogColor();
             glClearColor(fog.x, fog.y, fog.z, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
             Camera cam = player.camera(window.aspect());
-            worldRenderer.render(world, cam, environment, window.width(), window.height());
+            worldRenderer.render(world, cam, environment, window.width(), window.height(), player.isUnderwater());
             weatherRenderer.render(world, cam, environment);
             blockEffects.render(cam, dt, player.breakingX(), player.breakingY(), player.breakingZ(),
                                 player.breakProgress());

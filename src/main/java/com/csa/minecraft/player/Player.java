@@ -28,6 +28,8 @@ public class Player {
     private float breakTimer = 0f;
     private float breakDuration = 1f;
     private boolean breakingBlock = false;
+    private boolean inWater = false;
+    private boolean underwater = false;
     private final Inventory inv = new Inventory();
     private final Settings settings;
 
@@ -62,6 +64,8 @@ public class Player {
         }
         boolean creative = mode == GameMode.CREATIVE;
         boolean spectator = mode == GameMode.SPECTATOR;
+        inWater = isInWater(world);
+        underwater = isUnderwater(world);
         if (!creative) creativeFlyTapTimer = 0f;
         else creativeFlyTapTimer = Math.max(0f, creativeFlyTapTimer - dt);
 
@@ -97,7 +101,8 @@ public class Player {
         if (input.key(GLFW_KEY_D)) wish.add(right);
         if (input.key(GLFW_KEY_A)) wish.sub(right);
         if (wish.lengthSquared() > 0) wish.normalize();
-        float speed = spectator ? FLY_SPEED * 1.35f : (fly ? FLY_SPEED : SPEED);
+        float waterFactor = inWater && !fly && !spectator ? 0.45f : 1.0f;
+        float speed = (spectator ? FLY_SPEED * 1.35f : (fly ? FLY_SPEED : SPEED)) * waterFactor;
         vel.x = wish.x * speed;
         vel.y = spectator ? wish.y * speed : vel.y;
         vel.z = wish.z * speed;
@@ -107,7 +112,14 @@ public class Player {
             if (input.key(GLFW_KEY_SPACE)) vel.y += speed;
             if (input.key(GLFW_KEY_LEFT_SHIFT)) vel.y -= speed;
         } else {
-            vel.y -= GRAVITY * dt;
+            if (inWater) {
+                vel.y -= GRAVITY * 0.18f * dt;
+                vel.y *= 0.82f;
+                if (input.key(GLFW_KEY_SPACE)) vel.y = Math.max(vel.y, 3.2f);
+                if (input.key(GLFW_KEY_LEFT_SHIFT)) vel.y = Math.min(vel.y, -3.2f);
+            } else {
+                vel.y -= GRAVITY * dt;
+            }
             if (onGround && jumpPressed && !jumpConsumedByFlyToggle) {
                 vel.y = JUMP;
                 onGround = false;
@@ -146,6 +158,8 @@ public class Player {
     public void setOnGround(boolean g) { onGround = g; }
     public Vector3f velocity() { return vel; }
     public boolean isBreakingBlock() { return breakingBlock; }
+    public boolean isInWater() { return inWater; }
+    public boolean isUnderwater() { return underwater; }
     public int breakingX() { return breakX; }
     public int breakingY() { return breakY; }
     public int breakingZ() { return breakZ; }
@@ -216,11 +230,31 @@ public class Player {
 
     private float hardness(Block block) {
         return switch (block) {
-            case LEAVES, CHERRY_LEAVES, GLASS -> 0.45f;
+            case LEAVES, CHERRY_LEAVES, GLASS, WATER -> 0.45f;
             case DIRT, GRASS, SAND -> 0.75f;
             case WOOD, CHERRY_WOOD, PLANKS -> 1.15f;
             case STONE -> 1.55f;
             default -> 1.0f;
         };
+    }
+
+    private boolean isInWater(World world) {
+        int minX = (int) Math.floor(pos.x - WIDTH / 2);
+        int maxX = (int) Math.floor(pos.x + WIDTH / 2);
+        int minY = (int) Math.floor(pos.y);
+        int maxY = (int) Math.floor(pos.y + HEIGHT * 0.9f);
+        int minZ = (int) Math.floor(pos.z - WIDTH / 2);
+        int maxZ = (int) Math.floor(pos.z + WIDTH / 2);
+        for (int x = minX; x <= maxX; x++)
+            for (int y = minY; y <= maxY; y++)
+                for (int z = minZ; z <= maxZ; z++)
+                    if (world.getBlock(x, y, z) == Block.WATER) return true;
+        return false;
+    }
+
+    private boolean isUnderwater(World world) {
+        return world.getBlock((int) Math.floor(pos.x),
+                              (int) Math.floor(pos.y + EYE),
+                              (int) Math.floor(pos.z)) == Block.WATER;
     }
 }

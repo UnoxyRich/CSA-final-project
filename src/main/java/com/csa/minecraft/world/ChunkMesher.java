@@ -25,9 +25,13 @@ public class ChunkMesher {
 
     private static final float[] AO_LEVELS = {0.65f, 0.78f, 0.89f, 1.00f};
 
-    /** Glass is "solid" for game logic but visually transparent — don't let it cast AO. */
+    /** Transparent blocks don't cast AO. */
     private static boolean isOccluder(Block b) {
-        return b.solid && b != Block.GLASS;
+        return b.solid && b != Block.GLASS && b != Block.WATER;
+    }
+
+    private static boolean isTransparent(Block b) {
+        return b == Block.GLASS || b == Block.WATER;
     }
 
     public static void rebuild(Chunk c, World world) {
@@ -49,8 +53,8 @@ public class ChunkMesher {
                         } else {
                             n = c.get(nx, ny, nz);
                         }
-                        if (n.solid && n != Block.GLASS) continue;
-                        if (n == b && b == Block.GLASS) continue;
+                        if (n.solid && !isTransparent(n)) continue;
+                        if (n == b && isTransparent(b)) continue;
 
                         int faceCat = (f == 2) ? 0 : (f == 3 ? 1 : 2);
                         int tile = b.atlasIndex(faceCat);

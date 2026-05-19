@@ -60,7 +60,8 @@ public class Texture {
         palettes[10] = colors(0x5f3b38, 0x7a4a48); // cherry log side
         palettes[11] = colors(0xd8a6a6, 0xf0c2c2); // cherry log top
         palettes[12] = colors(0xf3a4c8, 0xffc1d9); // cherry leaves
-        for (int i = 13; i < 16; i++) palettes[i] = colors(0xff00ff, 0x000000);
+        palettes[13] = colors(0x2f6fd2, 0x4f96e8); // water
+        for (int i = 14; i < 16; i++) palettes[i] = colors(0xff00ff, 0x000000);
 
         Random rng = new Random(7);
         for (int ti = 0; ti < cols * cols; ti++) {
@@ -118,6 +119,7 @@ public class Texture {
             putTile(atlas, size, tile, cols, 10, load(zip, "cherry_log"));
             putTile(atlas, size, tile, cols, 11, load(zip, "cherry_log_top"));
             putTile(atlas, size, tile, cols, 12, load(zip, "cherry_leaves"));
+            putTile(atlas, size, tile, cols, 13, water(load(zip, "water_still")));
         }
 
         int id = glGenTextures();
@@ -221,6 +223,26 @@ public class Texture {
         free(base);
         free(overlay);
         return new Image(out, w, h, false);
+    }
+
+    private static Image water(Image src) {
+        ByteBuffer out = org.lwjgl.BufferUtils.createByteBuffer(src.w * src.h * 4);
+        for (int y = 0; y < src.h; y++) {
+            for (int x = 0; x < src.w; x++) {
+                int idx = (y * src.w + x) * 4;
+                int r = src.rgba.get(idx) & 0xff;
+                int g = src.rgba.get(idx + 1) & 0xff;
+                int b = src.rgba.get(idx + 2) & 0xff;
+                float lum = (r * 0.30f + g * 0.59f + b * 0.11f) / 255f;
+                float wave = (lum - 0.5f) * 0.55f;
+                out.put(idx,     (byte) clamp(42 + wave * 80));
+                out.put(idx + 1, (byte) clamp(105 + wave * 105));
+                out.put(idx + 2, (byte) clamp(220 + wave * 55));
+                out.put(idx + 3, (byte) 210);
+            }
+        }
+        free(src);
+        return new Image(out, src.w, src.h, false);
     }
 
     private static int sampleTint(Image colormap, int fallback) {
