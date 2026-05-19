@@ -18,6 +18,7 @@ public class WorldRenderer {
     private final Shader shader;
     private final Shader skyShader;
     private final Texture atlas;
+    private final Texture photonNoise;
     private final Mesh screenQuad;
 
     private static final String VERT = """
@@ -58,6 +59,7 @@ public class WorldRenderer {
         in float vDist;
         out vec4 fragColor;
         uniform sampler2D uAtlas;
+        uniform sampler2D uPhotonNoise;
         uniform vec3 uCamPos;
         uniform vec3 uFogColor;
         uniform vec3 uSkyTop;
@@ -84,9 +86,19 @@ public class WorldRenderer {
                 sin(vWorldPos.x * 2.1 + uTime * 1.3) * 0.0035,
                 cos(vWorldPos.z * 2.4 - uTime * 1.1) * 0.0035
             );
+            vec2 photonWaterUv = vWorldPos.xz * 0.018 + vec2(uTime * 0.018, -uTime * 0.011);
+            vec2 photonWater = texture(uPhotonNoise, photonWaterUv).rg - 0.5;
+            uv += blockWater * photonWater * 0.0065;
             vec4 c = texture(uAtlas, uv);
             if (c.a < 0.1) discard;
             vec3 N = normalize(vWorldNormal);
+            if (blockWater > 0.5 && N.y > 0.4) {
+                float h0 = texture(uPhotonNoise, photonWaterUv).r;
+                float hx = texture(uPhotonNoise, photonWaterUv + vec2(0.012, 0.0)).r;
+                float hz = texture(uPhotonNoise, photonWaterUv + vec2(0.0, 0.012)).r;
+                vec3 waveNormal = normalize(vec3((h0 - hx) * 0.32, 1.0, (h0 - hz) * 0.32));
+                N = normalize(mix(N, waveNormal, 0.65));
+            }
             vec3 V = normalize(uCamPos - vWorldPos);
             vec3 L = normalize(uSunDir);
             vec3 H = normalize(L + V);
@@ -141,35 +153,53 @@ public class WorldRenderer {
         #version 330 core
         in vec2 vPos;
         out vec4 fragColor;
+        uniform sampler2D uPhotonNoise;
         uniform vec3 uSkyTop;
         uniform vec3 uSkyHorizon;
         uniform vec2 uSunScreen;
+        uniform vec2 uMoonScreen;
+        uniform vec3 uSunDiskColor;
         uniform float uSunVisible;
+        uniform float uMoonVisible;
         uniform float uRain;
         uniform float uThunder;
+        uniform float uNight;
         uniform float uTime;
         uniform float uAspect;
         float hash(float n){ return fract(sin(n) * 43758.5453); }
         void main(){
             float y = clamp(vPos.y * 0.5 + 0.5, 0.0, 1.0);
             vec3 sky = mix(uSkyHorizon, uSkyTop, pow(y, 0.72));
+            float photonCloud = texture(uPhotonNoise, vPos * 0.10 + vec2(uTime * 0.004, 0.12)).r;
             vec2 p = vec2(vPos.x * uAspect, vPos.y);
             vec2 s = vec2(uSunScreen.x * uAspect, uSunScreen.y);
+            vec2 m = vec2(uMoonScreen.x * uAspect, uMoonScreen.y);
             float d = length(p - s);
             float sunDisc = smoothstep(0.08, 0.0, d);
             float glow = exp(-d * 3.2);
             float rayMask = max(0.0, 1.0 - d * 0.82);
             float rays = 0.0;
+            vec2 rayDir = normalize(p - s + vec2(0.0001, 0.0001));
             for (int i = 0; i < 7; i++) {
                 float a = float(i) * 1.047 + sin(uTime * 0.08) * 0.18;
                 vec2 dir = vec2(cos(a), sin(a));
-                float line = pow(max(dot(normalize(p - s), dir), 0.0), 42.0);
+                float line = pow(max(dot(rayDir, dir), 0.0), 42.0);
                 rays += line * rayMask;
             }
+            float moonDist = length(p - m);
+            float moonDisc = smoothstep(0.075, 0.0, moonDist);
+            float moonGlow = exp(-moonDist * 3.6);
+            vec2 starCell = floor((vPos * vec2(uAspect, 1.0) + vec2(11.3, 4.7)) * 145.0);
+            float starSeed = dot(starCell, vec2(12.9898, 78.233));
+            float star = step(0.9965, hash(starSeed));
+            star *= smoothstep(-0.05, 0.55, vPos.y) * uNight * (1.0 - uRain);
             float cloudShade = uRain * (0.10 + 0.07 * sin(vPos.x * 9.0 + uTime * 0.35));
+            cloudShade += uRain * smoothstep(0.42, 0.88, photonCloud) * 0.10;
             sky *= 1.0 - cloudShade - uThunder * 0.10;
-            sky += vec3(1.0, 0.84, 0.50) * uSunVisible * (sunDisc * 0.72 + glow * 0.12);
+            sky += vec3(0.62, 0.72, 1.0) * star * (0.25 + hash(starSeed + 4.0) * 0.75);
+            sky += uSunDiskColor * uSunVisible * (sunDisc * 0.72 + glow * 0.12);
             sky += vec3(1.0, 0.88, 0.58) * uSunVisible * rays * (1.0 - uRain) * 0.075;
+            sky += vec3(0.62, 0.72, 0.98) * uMoonVisible * (moonDisc * 0.50 + moonGlow * 0.045);
             vec3 mappedSky = sky / (sky + vec3(0.58));
             sky = mix(sky, mappedSky, 0.25 + uRain * 0.55);
             sky = pow(max(sky, vec3(0.0)), vec3(0.82));
@@ -181,6 +211,7 @@ public class WorldRenderer {
         shader = new Shader(VERT, FRAG);
         skyShader = new Shader(SKY_VERT, SKY_FRAG);
         atlas = Texture.buildBlockAtlas();
+        photonNoise = Texture.buildPhotonNoise();
         screenQuad = new Mesh();
         screenQuad.upload(new float[]{
             -1, -1,  1, -1,  1, 1,
@@ -190,7 +221,8 @@ public class WorldRenderer {
 
     public void render(World world, Camera cam, Environment env, int width, int height, boolean underwater) {
         double t = System.currentTimeMillis() * 0.001;
-        Vector3f sunWorld = sunDirection(t);
+        Vector3f sunWorld = env.sunDirection();
+        Vector3f lightWorld = env.lightDirection();
         renderSky(cam, env, sunWorld, width, height, (float) t, underwater);
 
         shader.use();
@@ -198,6 +230,8 @@ public class WorldRenderer {
         shader.setMat4("uProj", cam.proj);
         atlas.bind(0);
         shader.setInt("uAtlas", 0);
+        photonNoise.bind(1);
+        shader.setInt("uPhotonNoise", 1);
         shader.setVec3("uCamPos", cam.pos.x, cam.pos.y, cam.pos.z);
 
         float farBlocks = world.renderDistance() * (float) Chunk.SX;
@@ -209,7 +243,7 @@ public class WorldRenderer {
         shader.setVec3("uFogColor", fog.x, fog.y, fog.z);
         shader.setVec3("uSkyTop", skyTop.x, skyTop.y, skyTop.z);
 
-        shader.setVec3("uSunDir", sunWorld.x, sunWorld.y, sunWorld.z);
+        shader.setVec3("uSunDir", lightWorld.x, lightWorld.y, lightWorld.z);
 
         Vector3f ambient = env.ambient();
         Vector3f sunColor = env.sunColor();
@@ -254,25 +288,23 @@ public class WorldRenderer {
         glDisable(GL_DEPTH_TEST);
         glDepthMask(false);
         skyShader.use();
+        photonNoise.bind(1);
+        skyShader.setInt("uPhotonNoise", 1);
         Vector3f top = underwater ? new Vector3f(0.02f, 0.16f, 0.34f) : env.skyTop();
         Vector3f horizon = underwater ? new Vector3f(0.04f, 0.24f, 0.45f) : env.skyHorizon();
         skyShader.setVec3("uSkyTop", top.x, top.y, top.z);
         skyShader.setVec3("uSkyHorizon", horizon.x, horizon.y, horizon.z);
-        Vector4f sunClip = new Vector4f(
-            cam.pos.x + sunWorld.x * 1000f,
-            cam.pos.y + sunWorld.y * 1000f,
-            cam.pos.z + sunWorld.z * 1000f,
-            1f
-        );
-        cam.view.transform(sunClip);
-        cam.proj.transform(sunClip);
-        float visible = sunClip.w > 0f ? 1f : 0f;
-        float sx = visible > 0f ? sunClip.x / sunClip.w : 10f;
-        float sy = visible > 0f ? sunClip.y / sunClip.w : 10f;
-        skyShader.setVec2("uSunScreen", sx, sy);
-        skyShader.setFloat("uSunVisible", visible * (1f - env.rainStrength() * 0.75f));
+        float[] sunScreen = projectDirection(cam, sunWorld);
+        float[] moonScreen = projectDirection(cam, env.moonDirection());
+        skyShader.setVec2("uSunScreen", sunScreen[1], sunScreen[2]);
+        skyShader.setVec2("uMoonScreen", moonScreen[1], moonScreen[2]);
+        Vector3f sunColor = env.sunColor();
+        skyShader.setVec3("uSunDiskColor", sunColor.x, sunColor.y, sunColor.z);
+        skyShader.setFloat("uSunVisible", sunScreen[0] * env.sunDiscStrength() * (1f - env.rainStrength() * 0.75f) * (underwater ? 0f : 1f));
+        skyShader.setFloat("uMoonVisible", moonScreen[0] * env.moonDiscStrength() * (1f - env.rainStrength() * 0.65f) * (underwater ? 0f : 1f));
         skyShader.setFloat("uRain", env.rainStrength());
         skyShader.setFloat("uThunder", env.thunderStrength());
+        skyShader.setFloat("uNight", underwater ? 0f : env.nightAmount());
         skyShader.setFloat("uTime", time);
         skyShader.setFloat("uAspect", width / (float) Math.max(1, height));
         screenQuad.draw();
@@ -280,10 +312,18 @@ public class WorldRenderer {
         glEnable(GL_DEPTH_TEST);
     }
 
-    private Vector3f sunDirection(double t) {
-        float sx = (float) Math.cos(t * 0.08) * 0.58f;
-        float sy = (float) (0.68f + Math.sin(t * 0.08) * 0.18f);
-        float sz = (float) Math.sin(t * 0.08) * 0.58f;
-        return new Vector3f(sx, sy, sz).normalize();
+    private float[] projectDirection(Camera cam, Vector3f dir) {
+        Vector4f clip = new Vector4f(
+            cam.pos.x + dir.x * 1000f,
+            cam.pos.y + dir.y * 1000f,
+            cam.pos.z + dir.z * 1000f,
+            1f
+        );
+        cam.view.transform(clip);
+        cam.proj.transform(clip);
+        float visible = clip.w > 0f ? 1f : 0f;
+        float sx = visible > 0f ? clip.x / clip.w : 10f;
+        float sy = visible > 0f ? clip.y / clip.w : 10f;
+        return new float[]{ visible, sx, sy };
     }
 }

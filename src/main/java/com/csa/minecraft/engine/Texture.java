@@ -40,6 +40,19 @@ public class Texture {
         return buildProcedural();
     }
 
+    public static Texture buildPhotonNoise() {
+        Path pack = Path.of("photon_v1.3b.zip");
+        if (Files.isRegularFile(pack)) {
+            try (ZipFile zip = new ZipFile(pack.toFile())) {
+                Image image = loadExact(zip, "shaders/image/noise.png");
+                return uploadImage(image, true, true);
+            } catch (Exception e) {
+                System.err.println("Failed to load Photon noise texture, using fallback noise: " + e.getMessage());
+            }
+        }
+        return buildNoiseFallback();
+    }
+
     /** Build a procedural texture atlas: 4x4 tiles, each 16x16. */
     public static Texture buildProcedural() {
         int tile = 16, cols = 4;
@@ -131,6 +144,35 @@ public class Texture {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glGenerateMipmap(GL_TEXTURE_2D);
         return new Texture(id, cols, tile);
+    }
+
+    private static Texture uploadImage(Image image, boolean repeat, boolean linear) {
+        int id = glGenTextures();
+        glBindTexture(GL_TEXTURE_2D, id);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image.w, image.h, 0, GL_RGBA, GL_UNSIGNED_BYTE, image.rgba);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, repeat ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, repeat ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        Texture texture = new Texture(id, 1, image.w);
+        free(image);
+        return texture;
+    }
+
+    private static Texture buildNoiseFallback() {
+        int size = 256;
+        ByteBuffer buf = org.lwjgl.BufferUtils.createByteBuffer(size * size * 4);
+        Random rng = new Random(1337);
+        for (int i = 0; i < size * size; i++) {
+            byte v = (byte) rng.nextInt(256);
+            int idx = i * 4;
+            buf.put(idx, v);
+            buf.put(idx + 1, v);
+            buf.put(idx + 2, v);
+            buf.put(idx + 3, (byte) 255);
+        }
+        return uploadImage(new Image(buf, size, size, false), true, true);
     }
 
     private static Image load(ZipFile zip, String... names) throws Exception {
