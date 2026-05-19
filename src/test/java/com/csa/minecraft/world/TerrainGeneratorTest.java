@@ -28,12 +28,12 @@ class TerrainGeneratorTest {
 
     @Test
     void heightStaysInExpectedRange() {
-        // fbm output in [-1, 1] → heightAt in [64-18, 64+18] = [46, 82].
+        // Cherry mountain uplift can raise peaks, but terrain must stay inside chunk height.
         TerrainGenerator g = new TerrainGenerator(99L);
         for (int x = -50; x <= 50; x++)
             for (int z = -50; z <= 50; z++) {
                 int h = g.heightAt(x, z);
-                assertTrue(h >= 46 && h <= 82, "height " + h + " at " + x + "," + z + " out of range");
+                assertTrue(h >= 42 && h <= 112, "height " + h + " at " + x + "," + z + " out of range");
             }
     }
 

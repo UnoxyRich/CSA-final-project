@@ -154,6 +154,8 @@ public class HudRenderer {
             case SAND:   return new float[]{0.91f, 0.82f, 0.54f};
             case PLANKS: return new float[]{0.72f, 0.54f, 0.29f};
             case GLASS:  return new float[]{0.81f, 0.92f, 1.00f};
+            case CHERRY_WOOD:   return new float[]{0.55f, 0.33f, 0.33f};
+            case CHERRY_LEAVES: return new float[]{0.95f, 0.48f, 0.70f};
             default:     return new float[]{1,1,1};
         }
     }

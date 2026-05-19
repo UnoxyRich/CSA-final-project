@@ -57,7 +57,10 @@ public class Texture {
         palettes[7]  = colors(0xe8d28a, 0xf0dc9a); // sand
         palettes[8]  = colors(0xb88a4a, 0xc89a5a); // planks
         palettes[9]  = colors(0xcfeaff, 0xdff4ff); // glass
-        for (int i = 10; i < 16; i++) palettes[i] = colors(0xff00ff, 0x000000);
+        palettes[10] = colors(0x5f3b38, 0x7a4a48); // cherry log side
+        palettes[11] = colors(0xd8a6a6, 0xf0c2c2); // cherry log top
+        palettes[12] = colors(0xf3a4c8, 0xffc1d9); // cherry leaves
+        for (int i = 13; i < 16; i++) palettes[i] = colors(0xff00ff, 0x000000);
 
         Random rng = new Random(7);
         for (int ti = 0; ti < cols * cols; ti++) {
@@ -112,6 +115,9 @@ public class Texture {
             putTile(atlas, size, tile, cols, 7, load(zip, "sand"));
             putTile(atlas, size, tile, cols, 8, load(zip, "oak_planks", "planks_oak"));
             putTile(atlas, size, tile, cols, 9, load(zip, "glass"));
+            putTile(atlas, size, tile, cols, 10, load(zip, "cherry_log"));
+            putTile(atlas, size, tile, cols, 11, load(zip, "cherry_log_top"));
+            putTile(atlas, size, tile, cols, 12, load(zip, "cherry_leaves"));
         }
 
         int id = glGenTextures();

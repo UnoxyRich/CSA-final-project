@@ -2,7 +2,7 @@ package com.csa.minecraft.world;
 
 import java.util.Random;
 
-/** Simple value-noise heightmap + tree scattering. */
+/** Value-noise heightmap with plains, wooded hills, and cherry blossom mountains. */
 public class TerrainGenerator {
     private final long seed;
     public TerrainGenerator(long seed) { this.seed = seed; }
@@ -13,6 +13,7 @@ public class TerrainGenerator {
             for (int z = 0; z < Chunk.SZ; z++) {
                 int wx = c.worldX(x), wz = c.worldZ(z);
                 int h = heightAt(wx, wz);
+                boolean cherryMountain = cherryMountainAt(wx, wz);
                 for (int y = 0; y <= h; y++) {
                     Block b;
                     if (y == h) b = h <= 62 ? Block.SAND : Block.GRASS;
@@ -20,8 +21,11 @@ public class TerrainGenerator {
                     else b = Block.STONE;
                     c.set(x, y, z, b);
                 }
-                // scatter trees
-                if (h > 63 && rng.nextInt(60) == 0 && x > 1 && x < Chunk.SX - 2 && z > 1 && z < Chunk.SZ - 2) {
+                if (cherryMountain && h > 76 && rng.nextInt(24) == 0 &&
+                    x > 2 && x < Chunk.SX - 3 && z > 2 && z < Chunk.SZ - 3) {
+                    placeCherryTree(c, x, h + 1, z, rng);
+                } else if (h > 63 && rng.nextInt(60) == 0 &&
+                           x > 1 && x < Chunk.SX - 2 && z > 1 && z < Chunk.SZ - 2) {
                     placeTree(c, x, h + 1, z, rng);
                 }
             }
@@ -29,8 +33,15 @@ public class TerrainGenerator {
     }
 
     public int heightAt(int wx, int wz) {
-        float n = fbm(wx * 0.015f, wz * 0.015f, 4);
-        return (int) (64 + n * 18);
+        float rolling = fbm(wx * 0.015f, wz * 0.015f, 4);
+        float mountainMask = cherryMountainMask(wx, wz);
+        float ridge = Math.abs(fbm(wx * 0.028f + 91.7f, wz * 0.028f - 37.2f, 4));
+        float peaks = (float) Math.pow(ridge, 1.35f);
+        return clampHeight((int) (64 + rolling * 18 + mountainMask * (18 + peaks * 30)));
+    }
+
+    public boolean cherryMountainAt(int wx, int wz) {
+        return cherryMountainMask(wx, wz) > 0.38f;
     }
 
     private void placeTree(Chunk c, int x, int y, int z, Random rng) {
@@ -42,6 +53,29 @@ public class TerrainGenerator {
                 for (int dy = -1; dy <= 1; dy++)
                     if (Math.abs(dx) + Math.abs(dz) + Math.abs(dy) <= 3 && c.get(x+dx, top+dy, z+dz) == Block.AIR)
                         c.set(x+dx, top+dy, z+dz, Block.LEAVES);
+    }
+
+    private void placeCherryTree(Chunk c, int x, int y, int z, Random rng) {
+        int trunk = 5 + rng.nextInt(3);
+        for (int i = 0; i < trunk; i++) c.set(x, y + i, z, Block.CHERRY_WOOD);
+        int top = y + trunk;
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dz = -3; dz <= 3; dz++) {
+                for (int dy = -2; dy <= 1; dy++) {
+                    int dist = Math.abs(dx) + Math.abs(dz);
+                    if (dist + Math.abs(dy) <= 5 && rng.nextInt(10) != 0 &&
+                        c.get(x + dx, top + dy, z + dz) == Block.AIR) {
+                        c.set(x + dx, top + dy, z + dz, Block.CHERRY_LEAVES);
+                    }
+                }
+            }
+        }
+        for (int i = 0; i < 5; i++) {
+            int bx = x + rng.nextInt(5) - 2;
+            int bz = z + rng.nextInt(5) - 2;
+            int by = top - 1 - rng.nextInt(2);
+            if (c.get(bx, by, bz) == Block.AIR) c.set(bx, by, bz, Block.CHERRY_LEAVES);
+        }
     }
 
     // value noise
@@ -66,5 +100,19 @@ public class TerrainGenerator {
             norm += amp; amp *= 0.5f; freq *= 2;
         }
         return sum / norm;
+    }
+
+    private float cherryMountainMask(int wx, int wz) {
+        float biome = fbm(wx * 0.0045f + 241.3f, wz * 0.0045f - 117.8f, 3);
+        return smoothstep(0.18f, 0.64f, biome);
+    }
+
+    private float smoothstep(float edge0, float edge1, float x) {
+        float t = Math.max(0f, Math.min(1f, (x - edge0) / (edge1 - edge0)));
+        return t * t * (3f - 2f * t);
+    }
+
+    private int clampHeight(int h) {
+        return Math.max(42, Math.min(112, h));
     }
 }

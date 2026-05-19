@@ -135,7 +135,7 @@ public class WeatherRenderer {
     private boolean hasOpenSky(World world, int x, int y, int z) {
         for (int yy = Math.max(0, y); yy < Chunk.SY; yy++) {
             Block b = world.getBlock(x, yy, z);
-            if (b.solid && b != Block.GLASS && b != Block.LEAVES) return false;
+            if (b.solid && b != Block.GLASS && b != Block.LEAVES && b != Block.CHERRY_LEAVES) return false;
         }
         return true;
     }

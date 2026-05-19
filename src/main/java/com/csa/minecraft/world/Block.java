@@ -2,7 +2,8 @@ package com.csa.minecraft.world;
 
 public enum Block {
     AIR(false), GRASS(true), DIRT(true), STONE(true),
-    WOOD(true), LEAVES(true), SAND(true), PLANKS(true), GLASS(true);
+    WOOD(true), LEAVES(true), SAND(true), PLANKS(true), GLASS(true),
+    CHERRY_WOOD(true), CHERRY_LEAVES(true);
 
     public final boolean solid;
     Block(boolean s) { this.solid = s; }
@@ -23,6 +24,8 @@ public enum Block {
             case SAND:   return 7;
             case PLANKS: return 8;
             case GLASS:  return 9;
+            case CHERRY_WOOD:   return face <= 1 ? 11 : 10;
+            case CHERRY_LEAVES: return 12;
             default:     return 3;
         }
     }

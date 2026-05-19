@@ -216,9 +216,9 @@ public class Player {
 
     private float hardness(Block block) {
         return switch (block) {
-            case LEAVES, GLASS -> 0.45f;
+            case LEAVES, CHERRY_LEAVES, GLASS -> 0.45f;
             case DIRT, GRASS, SAND -> 0.75f;
-            case WOOD, PLANKS -> 1.15f;
+            case WOOD, CHERRY_WOOD, PLANKS -> 1.15f;
             case STONE -> 1.55f;
             default -> 1.0f;
         };

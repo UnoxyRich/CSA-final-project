@@ -222,6 +222,8 @@ public class BlockEffectsRenderer {
             case SAND -> new float[]{0.82f, 0.72f, 0.45f};
             case PLANKS -> new float[]{0.62f, 0.43f, 0.20f};
             case GLASS -> new float[]{0.72f, 0.86f, 1.00f};
+            case CHERRY_WOOD -> new float[]{0.52f, 0.30f, 0.30f};
+            case CHERRY_LEAVES -> new float[]{0.92f, 0.45f, 0.66f};
             default -> new float[]{1f, 1f, 1f};
         };
     }
