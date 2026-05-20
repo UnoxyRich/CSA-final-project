@@ -25,18 +25,28 @@ public class ChunkMesher {
 
     private static final float[] AO_LEVELS = {0.65f, 0.78f, 0.89f, 1.00f};
 
-    /** Transparent blocks don't cast AO. */
+    /** Transparent blocks (glass, water) and cutout leaves don't cast AO. */
     private static boolean isOccluder(Block b) {
-        return b.solid && b != Block.GLASS && b != Block.WATER;
+        return b.solid && b != Block.GLASS && b != Block.WATER && !isLeaves(b);
     }
 
     private static boolean isTransparent(Block b) {
         return b == Block.GLASS || b == Block.WATER;
     }
 
+    /**
+     * Leaves use a cutout (alpha-tested) texture. Like glass/water, their faces
+     * must not be culled away by adjacent opaque blocks. But unlike glass/water
+     * they keep the faces shared with neighbouring leaves, so the canopy renders
+     * as a dense mass instead of a see-through shell.
+     */
+    private static boolean isLeaves(Block b) {
+        return b == Block.LEAVES || b == Block.CHERRY_LEAVES || b == Block.SPRUCE_LEAVES;
+    }
+
     public static void rebuild(Chunk c, World world) {
         List<Float> data = new ArrayList<>(4096);
-        int atlasSize = 4; // must match Texture
+        int atlasSize = 8; // must match Texture (8x8 = 64 tiles)
         float uStep = 1f / atlasSize;
         for (int y = 0; y < Chunk.SY; y++) {
             for (int z = 0; z < Chunk.SZ; z++) {
@@ -53,7 +63,7 @@ public class ChunkMesher {
                         } else {
                             n = c.get(nx, ny, nz);
                         }
-                        if (n.solid && !isTransparent(n)) continue;
+                        if (n.solid && !isTransparent(n) && !isLeaves(n)) continue;
                         if (n == b && isTransparent(b)) continue;
 
                         int faceCat = (f == 2) ? 0 : (f == 3 ? 1 : 2);

@@ -157,6 +157,13 @@ public class HudRenderer {
             case CHERRY_WOOD:   return new float[]{0.55f, 0.33f, 0.33f};
             case CHERRY_LEAVES: return new float[]{0.95f, 0.48f, 0.70f};
             case WATER: return new float[]{0.22f, 0.45f, 0.90f};
+            case SNOW:  return new float[]{0.95f, 0.97f, 0.99f};
+            case ICE:   return new float[]{0.65f, 0.81f, 0.93f};
+            case CACTUS: return new float[]{0.31f, 0.49f, 0.21f};
+            case SANDSTONE: return new float[]{0.89f, 0.82f, 0.60f};
+            case SPRUCE_WOOD:   return new float[]{0.23f, 0.16f, 0.10f};
+            case SPRUCE_LEAVES: return new float[]{0.12f, 0.29f, 0.16f};
+            case DRY_GRASS:     return new float[]{0.60f, 0.67f, 0.30f};
             default:     return new float[]{1,1,1};
         }
     }

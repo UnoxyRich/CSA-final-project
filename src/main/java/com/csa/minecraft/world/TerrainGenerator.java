@@ -2,9 +2,17 @@ package com.csa.minecraft.world;
 
 import java.util.Random;
 
-/** Value-noise heightmap with plains, wooded hills, and cherry blossom mountains. */
+/**
+ * Value-noise heightmap with several biomes. Elevation comes from {@link #heightAt};
+ * {@link #biomeAt} layers temperature/humidity noise on top to pick a biome, which
+ * then drives surface blocks, water freezing, and which decoration (trees, cacti) is
+ * scattered. Generation is deterministic per (seed, chunk).
+ */
 public class TerrainGenerator {
     public static final int SEA_LEVEL = 62;
+    /** Columns at or above this height get a snow cap (except hot biomes). */
+    private static final int SNOW_LINE = 96;
+
     private final long seed;
     public TerrainGenerator(long seed) { this.seed = seed; }
 
@@ -14,25 +22,74 @@ public class TerrainGenerator {
             for (int z = 0; z < Chunk.SZ; z++) {
                 int wx = c.worldX(x), wz = c.worldZ(z);
                 int h = heightAt(wx, wz);
-                boolean cherryMountain = cherryMountainAt(wx, wz);
+                Biome biome = biomeAt(wx, wz);
+                boolean snowCap = h >= SNOW_LINE && biome != Biome.DESERT && biome != Biome.SAVANNA;
+                boolean beach = h <= SEA_LEVEL + 1;
+                Block surface = surfaceBlock(biome);
+                Block filler = fillerBlock(biome);
                 for (int y = 0; y <= h; y++) {
                     Block b;
-                    if (y == h) b = h <= SEA_LEVEL + 1 ? Block.SAND : Block.GRASS;
-                    else if (y >= h - 3) b = h <= SEA_LEVEL + 1 ? Block.SAND : Block.DIRT;
-                    else b = Block.STONE;
+                    if (y == h)        b = snowCap ? Block.SNOW  : (beach ? Block.SAND : surface);
+                    else if (y >= h-3) b = snowCap ? Block.STONE : (beach ? Block.SAND : filler);
+                    else               b = Block.STONE;
                     c.set(x, y, z, b);
                 }
                 if (h < SEA_LEVEL) {
-                    for (int y = h + 1; y <= SEA_LEVEL; y++) c.set(x, y, z, Block.WATER);
+                    for (int y = h + 1; y <= SEA_LEVEL; y++) {
+                        // Lakes and shallows in the cold biome freeze over at the surface.
+                        boolean frozenTop = biome == Biome.SNOWY_TUNDRA && y == SEA_LEVEL;
+                        c.set(x, y, z, frozenTop ? Block.ICE : Block.WATER);
+                    }
                 }
-                if (cherryMountain && h > 76 && rng.nextInt(24) == 0 &&
-                    x > 2 && x < Chunk.SX - 3 && z > 2 && z < Chunk.SZ - 3) {
-                    placeCherryTree(c, x, h + 1, z, rng);
-                } else if (h > 63 && rng.nextInt(60) == 0 &&
-                           x > 1 && x < Chunk.SX - 2 && z > 1 && z < Chunk.SZ - 2) {
-                    placeTree(c, x, h + 1, z, rng);
-                }
+                decorate(c, biome, x, h, z, rng);
             }
+        }
+    }
+
+    /** Surface (top) block for a biome above the beach line. */
+    private static Block surfaceBlock(Biome biome) {
+        return switch (biome) {
+            case DESERT -> Block.SAND;
+            case SAVANNA -> Block.DRY_GRASS;
+            case SNOWY_TUNDRA -> Block.SNOW;
+            default -> Block.GRASS;
+        };
+    }
+
+    /** Block filling the few layers just below the surface. */
+    private static Block fillerBlock(Biome biome) {
+        return biome == Biome.DESERT ? Block.SANDSTONE : Block.DIRT;
+    }
+
+    /** Scatters biome-appropriate decoration on top of a finished column. */
+    private void decorate(Chunk c, Biome biome, int x, int h, int z, Random rng) {
+        boolean m2 = x > 1 && x < Chunk.SX - 2 && z > 1 && z < Chunk.SZ - 2;
+        boolean m3 = x > 2 && x < Chunk.SX - 3 && z > 2 && z < Chunk.SZ - 3;
+        int top = h + 1;
+        switch (biome) {
+            case CHERRY_MOUNTAINS -> {
+                if (h > 76 && m3 && rng.nextInt(24) == 0) placeCherryTree(c, x, top, z, rng);
+                else if (h > SEA_LEVEL + 1 && m2 && rng.nextInt(80) == 0) placeTree(c, x, top, z, rng);
+            }
+            case FOREST -> {
+                if (h > SEA_LEVEL + 1 && m2 && rng.nextInt(20) == 0) placeTree(c, x, top, z, rng);
+            }
+            case PLAINS -> {
+                if (h > SEA_LEVEL + 1 && m2 && rng.nextInt(150) == 0) placeTree(c, x, top, z, rng);
+            }
+            case TAIGA -> {
+                if (h > SEA_LEVEL + 1 && m3 && rng.nextInt(18) == 0) placeSpruceTree(c, x, top, z, rng);
+            }
+            case SNOWY_TUNDRA -> {
+                if (h > SEA_LEVEL + 1 && m3 && rng.nextInt(55) == 0) placeSpruceTree(c, x, top, z, rng);
+            }
+            case SAVANNA -> {
+                if (h > SEA_LEVEL + 1 && m3 && rng.nextInt(96) == 0) placeAcaciaTree(c, x, top, z, rng);
+            }
+            case DESERT -> {
+                if (h > SEA_LEVEL + 1 && m2 && rng.nextInt(64) == 0) placeCactus(c, x, top, z, rng);
+            }
+            case OCEAN -> { }
         }
     }
 
@@ -45,6 +102,23 @@ public class TerrainGenerator {
         float oceanFloor = 49f + rolling * 6f;
         float land = 64 + rolling * 18 + mountainMask * (18 + peaks * 30);
         return clampHeight((int) mix(land, oceanFloor, oceanMask));
+    }
+
+    /**
+     * Classifies the biome at a column. Ocean and cherry mountains are decided by
+     * their dedicated masks (so terrain shape and biome agree); everything else is
+     * split by temperature and humidity noise.
+     */
+    public Biome biomeAt(int wx, int wz) {
+        if (oceanMask(wx, wz) > 0.5f) return Biome.OCEAN;
+        if (cherryMountainAt(wx, wz)) return Biome.CHERRY_MOUNTAINS;
+        float temp = temperature(wx, wz);
+        float humid = humidity(wx, wz);
+        if (temp > 0.30f) return humid < 0.0f ? Biome.DESERT : Biome.SAVANNA;
+        if (temp < -0.30f) return Biome.SNOWY_TUNDRA;
+        if (temp < -0.08f) return Biome.TAIGA;
+        if (humid > 0.12f) return Biome.FOREST;
+        return Biome.PLAINS;
     }
 
     public boolean cherryMountainAt(int wx, int wz) {
@@ -85,6 +159,57 @@ public class TerrainGenerator {
         }
     }
 
+    /** Tall conical spruce: a straight trunk skirted by tiered leaf rings. */
+    private void placeSpruceTree(Chunk c, int x, int y, int z, Random rng) {
+        int trunk = 6 + rng.nextInt(4);
+        for (int i = 0; i < trunk; i++) c.set(x, y + i, z, Block.SPRUCE_WOOD);
+        int top = y + trunk;
+        c.set(x, top, z, Block.SPRUCE_LEAVES);
+        int[] radii = {1, 0, 2, 1, 2, 2, 3};
+        for (int l = 0; l < radii.length; l++) {
+            int ly = top - 1 - l;
+            if (ly <= y) break;
+            int r = radii[l];
+            for (int dx = -r; dx <= r; dx++)
+                for (int dz = -r; dz <= r; dz++) {
+                    if (Math.abs(dx) + Math.abs(dz) > r + 1) continue;
+                    if (dx == 0 && dz == 0) continue;
+                    if (c.get(x + dx, ly, z + dz) == Block.AIR)
+                        c.set(x + dx, ly, z + dz, Block.SPRUCE_LEAVES);
+                }
+        }
+    }
+
+    /** Short savanna tree: a leaning trunk topped by a flat umbrella of leaves. */
+    private void placeAcaciaTree(Chunk c, int x, int y, int z, Random rng) {
+        int trunk = 3 + rng.nextInt(2);
+        for (int i = 0; i < trunk; i++) c.set(x, y + i, z, Block.WOOD);
+        int dirX = rng.nextBoolean() ? 1 : -1;
+        int dirZ = rng.nextBoolean() ? 1 : -1;
+        int lean = 1 + rng.nextInt(2);
+        int cx = x, cz = z, cy = y + trunk;
+        for (int i = 0; i < lean; i++) {
+            cx += dirX; cz += dirZ;
+            c.set(cx, cy, cz, Block.WOOD);
+            cy++;
+        }
+        for (int dx = -2; dx <= 2; dx++)
+            for (int dz = -2; dz <= 2; dz++)
+                for (int dy = 0; dy <= 1; dy++) {
+                    int dist = Math.abs(dx) + Math.abs(dz);
+                    if (dist > 3) continue;
+                    if (dy == 1 && dist > 1) continue;
+                    if (c.get(cx + dx, cy + dy, cz + dz) == Block.AIR)
+                        c.set(cx + dx, cy + dy, cz + dz, Block.LEAVES);
+                }
+    }
+
+    /** Single column of cactus, 2-4 blocks tall. */
+    private void placeCactus(Chunk c, int x, int y, int z, Random rng) {
+        int height = 2 + rng.nextInt(3);
+        for (int i = 0; i < height; i++) c.set(x, y + i, z, Block.CACTUS);
+    }
+
     // value noise
     private float hash(int x, int z) {
         long h = (long)x * 374761393L + (long)z * 668265263L + seed * 982451653L;
@@ -117,6 +242,16 @@ public class TerrainGenerator {
     private float oceanMask(int wx, int wz) {
         float biome = fbm(wx * 0.0035f - 83.4f, wz * 0.0035f + 219.8f, 3);
         return smoothstep(0.05f, 0.42f, -biome);
+    }
+
+    /** Large-scale temperature field; high = hot (desert/savanna), low = cold (taiga/tundra). */
+    private float temperature(int wx, int wz) {
+        return fbm(wx * 0.0052f + 528.4f, wz * 0.0052f - 162.7f, 3);
+    }
+
+    /** Large-scale humidity field; high = wet (forest), low = dry (plains/desert). */
+    private float humidity(int wx, int wz) {
+        return fbm(wx * 0.0061f - 311.2f, wz * 0.0061f + 407.9f, 3);
     }
 
     private float smoothstep(float edge0, float edge1, float x) {

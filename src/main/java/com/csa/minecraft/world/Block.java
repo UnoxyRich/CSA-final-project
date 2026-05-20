@@ -3,7 +3,11 @@ package com.csa.minecraft.world;
 public enum Block {
     AIR(false), GRASS(true), DIRT(true), STONE(true),
     WOOD(true), LEAVES(true), SAND(true), PLANKS(true), GLASS(true),
-    CHERRY_WOOD(true), CHERRY_LEAVES(true), WATER(false);
+    CHERRY_WOOD(true), CHERRY_LEAVES(true), WATER(false),
+    // Biome blocks appended after WATER so existing ordinals (and the
+    // hard-coded water=11/glass=8/leaves=5 ids in the world shader) are stable.
+    SNOW(true), ICE(true), CACTUS(true), SANDSTONE(true),
+    SPRUCE_WOOD(true), SPRUCE_LEAVES(true), DRY_GRASS(true);
 
     public final boolean solid;
     Block(boolean s) { this.solid = s; }
@@ -27,6 +31,13 @@ public enum Block {
             case CHERRY_WOOD:   return face <= 1 ? 11 : 10;
             case CHERRY_LEAVES: return 12;
             case WATER: return 13;
+            case SNOW:   return 14;
+            case ICE:    return 15;
+            case CACTUS: return face <= 1 ? 16 : 17;
+            case SANDSTONE: return 18;
+            case SPRUCE_WOOD:   return face <= 1 ? 20 : 19;
+            case SPRUCE_LEAVES: return 21;
+            case DRY_GRASS:     return face == 0 ? 22 : (face == 1 ? 0 : 23);
             default:     return 3;
         }
     }

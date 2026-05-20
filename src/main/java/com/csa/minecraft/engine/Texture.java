@@ -53,12 +53,12 @@ public class Texture {
         return buildNoiseFallback();
     }
 
-    /** Build a procedural texture atlas: 4x4 tiles, each 16x16. */
+    /** Build a procedural texture atlas: 8x8 tiles, each 16x16. */
     public static Texture buildProcedural() {
-        int tile = 16, cols = 4;
+        int tile = 16, cols = 8;
         int size = tile * cols;
         ByteBuffer buf = org.lwjgl.BufferUtils.createByteBuffer(size * size * 4);
-        int[][] palettes = new int[16][];
+        int[][] palettes = new int[cols * cols][];
         // tile colors keyed by atlas index (see Block.atlasIndex)
         palettes[0]  = colors(0x8b5a2b, 0x9c6a3b); // dirt
         palettes[1]  = colors(0x4caf50, 0x60c060); // grass top
@@ -74,7 +74,17 @@ public class Texture {
         palettes[11] = colors(0xd8a6a6, 0xf0c2c2); // cherry log top
         palettes[12] = colors(0xf3a4c8, 0xffc1d9); // cherry leaves
         palettes[13] = colors(0x2f6fd2, 0x4f96e8); // water
-        for (int i = 14; i < 16; i++) palettes[i] = colors(0xff00ff, 0x000000);
+        palettes[14] = colors(0xf4f8fb, 0xe7eef4); // snow
+        palettes[15] = colors(0xa6cdeb, 0xc6e2f5); // ice
+        palettes[16] = colors(0x73a046, 0x82af52); // cactus top
+        palettes[17] = colors(0x4f7d34, 0x5d8c3f); // cactus side
+        palettes[18] = colors(0xe3d29a, 0xd7c68c); // sandstone
+        palettes[19] = colors(0x3a2a1a, 0x4a3422); // spruce log side (dark bark)
+        palettes[20] = colors(0x6b4b2c, 0x7a5836); // spruce log top
+        palettes[21] = colors(0x1f4a2a, 0x2a5c34); // spruce leaves
+        palettes[22] = colors(0x9aaa4c, 0xb0bd60); // dry grass top (savanna)
+        palettes[23] = colors(0x8a7a3c, 0x736030); // dry grass side
+        for (int i = 24; i < palettes.length; i++) palettes[i] = colors(0xff00ff, 0x000000);
 
         Random rng = new Random(7);
         for (int ti = 0; ti < cols * cols; ti++) {
@@ -108,16 +118,22 @@ public class Texture {
     }
 
     private static Texture buildFromResourcePack(Path pack) throws Exception {
-        int tile = 128, cols = 4;
+        int tile = 128, cols = 8;
         int size = tile * cols;
         ByteBuffer atlas = org.lwjgl.BufferUtils.createByteBuffer(size * size * 4);
 
+        // dry-grass tint: a warm yellow-green, the savanna end of the grass colormap.
+        int savannaTint = 0xbfb755;
         try (ZipFile zip = new ZipFile(pack.toFile())) {
             int grassTint = sampleTint(loadExact(zip, "assets/minecraft/textures/colormap/grass.png"), 0x91bd59);
             int foliageTint = sampleTint(loadExact(zip, "assets/minecraft/textures/colormap/foliage.png"), 0x77ab2f);
             Image grassSide = composeOverlay(
                 load(zip, "grass_block_side", "grass_side"),
                 tint(load(zip, "grass_block_side_overlay", "grass_side_overlay"), grassTint)
+            );
+            Image dryGrassSide = composeOverlay(
+                load(zip, "grass_block_side", "grass_side"),
+                tint(load(zip, "grass_block_side_overlay", "grass_side_overlay"), savannaTint)
             );
             putTile(atlas, size, tile, cols, 0, load(zip, "dirt"));
             putTile(atlas, size, tile, cols, 1, tint(load(zip, "grass_block_top", "grass_top"), grassTint));
@@ -133,6 +149,18 @@ public class Texture {
             putTile(atlas, size, tile, cols, 11, load(zip, "cherry_log_top"));
             putTile(atlas, size, tile, cols, 12, load(zip, "cherry_leaves"));
             putTile(atlas, size, tile, cols, 13, water(load(zip, "water_still")));
+            putTile(atlas, size, tile, cols, 14, load(zip, "snow"));
+            putTile(atlas, size, tile, cols, 15, load(zip, "ice"));
+            putTile(atlas, size, tile, cols, 16, load(zip, "cactus_top"));
+            putTile(atlas, size, tile, cols, 17, load(zip, "cactus_side"));
+            putTile(atlas, size, tile, cols, 18, load(zip, "sandstone_normal", "sandstone"));
+            putTile(atlas, size, tile, cols, 19, load(zip, "spruce_log", "log_spruce"));
+            putTile(atlas, size, tile, cols, 20, load(zip, "spruce_log_top", "log_spruce_top"));
+            // spruce_leaves.png ships grayscale; spruce uses a constant foliage color
+            // (not the biome colormap), so tint it with Minecraft's fixed spruce green.
+            putTile(atlas, size, tile, cols, 21, tint(load(zip, "spruce_leaves", "leaves_spruce"), 0x619961));
+            putTile(atlas, size, tile, cols, 22, tint(load(zip, "grass_block_top", "grass_top"), savannaTint));
+            putTile(atlas, size, tile, cols, 23, dryGrassSide);
         }
 
         int id = glGenTextures();
