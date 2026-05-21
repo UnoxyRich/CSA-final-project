@@ -4,12 +4,12 @@ setlocal
 cd /d "%~dp0"
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-windows.ps1" %*
-set "EXIT_CODE=%ERRORLEVEL%"
+set "LAUNCH_EXIT=%ERRORLEVEL%"
 
-if not "%EXIT_CODE%"=="0" (
+if not "%LAUNCH_EXIT%"=="0" (
   echo.
-  echo Launcher failed with exit code %EXIT_CODE%.
+  echo Launcher failed with exit code %LAUNCH_EXIT%.
   pause
 )
 
-exit /b %EXIT_CODE%
+exit /b %LAUNCH_EXIT%

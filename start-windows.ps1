@@ -27,12 +27,32 @@ function Get-JavaMajorVersion {
         return 0
     }
 
-    $versionLine = & $JavaExe -version 2>&1 | Select-Object -First 1
+    $versionLine = Get-JavaVersionLine $JavaExe
     if ($versionLine -match '"(?<major>\d+)') {
         return [int] $Matches.major
     }
 
     return 0
+}
+
+function Get-JavaVersionLine {
+    param([string] $JavaExe)
+
+    $psi = [System.Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $JavaExe
+    $psi.Arguments = "-version"
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+
+    $process = [System.Diagnostics.Process]::Start($psi)
+    $stdout = $process.StandardOutput.ReadToEnd()
+    $stderr = $process.StandardError.ReadToEnd()
+    $process.WaitForExit()
+
+    $lines = @($stderr -split "`r?`n") + @($stdout -split "`r?`n")
+    return $lines | Where-Object { $_ } | Select-Object -First 1
 }
 
 function Find-Java17Home {
@@ -175,7 +195,7 @@ function Ensure-Gradle {
 
 Ensure-Java17
 $gradleCommand = Ensure-Gradle
-$javaVersion = & (Join-Path $env:JAVA_HOME "bin\java.exe") -version 2>&1 | Select-Object -First 1
+$javaVersion = Get-JavaVersionLine (Join-Path $env:JAVA_HOME "bin\java.exe")
 
 Write-Host "-> JAVA_HOME: $env:JAVA_HOME"
 Write-Host "-> Java:      $javaVersion"
