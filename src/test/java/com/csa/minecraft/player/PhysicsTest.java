@@ -110,6 +110,47 @@ class PhysicsTest {
     }
 
     @Test
+    void restingOnGroundProducesNoVerticalJitter() {
+        World w = new World(1L);
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dz = -1; dz <= 1; dz++)
+                w.setBlock(8 + dx, Y - 1, 8 + dz, Block.STONE);
+
+        Player p = new Player(new Vector3f(8.5f, Y, 8.5f));
+
+        // Settle for a couple of frames, applying gravity like Player.update does.
+        for (int i = 0; i < 3; i++) {
+            p.velocity().y -= Player.GRAVITY * 0.05f;
+            Physics.moveAndCollide(p, w, 0.05f);
+        }
+        float settledY = p.position().y;
+
+        // Every subsequent resting frame must land on the exact same Y — the camera
+        // sits at pos.y + EYE, so any drift here is a visible screen shake.
+        for (int i = 0; i < 60; i++) {
+            p.velocity().y -= Player.GRAVITY * 0.05f;
+            Physics.moveAndCollide(p, w, 0.05f);
+            assertEquals(settledY, p.position().y, 0f,
+                "resting Y must be perfectly stable; jittered on frame " + i);
+            assertTrue(p.isOnGround(), "must stay onGround every resting frame");
+        }
+    }
+
+    @Test
+    void preExistingOverlapWithZeroVelocityResolvesWithoutHanging() {
+        World w = new World(1L);
+        // Block placed inside the player's AABB with no velocity — the old 0.01
+        // step-back used Math.signum(0)==0 and looped forever. Must simply return.
+        w.setBlock(8, Y, 8, Block.STONE);
+        Player p = new Player(new Vector3f(8.5f, Y, 8.5f));
+        p.velocity().set(0, 0, 0);
+
+        assertTimeoutPreemptively(java.time.Duration.ofSeconds(2),
+            () -> Physics.moveAndCollide(p, w, 0.05f),
+            "zero-velocity overlap must not loop forever");
+    }
+
+    @Test
     void zMotionResolvesIndependentlyOfX() {
         World w = new World(1L);
         // Wall on +Z side at z=10. Place it across enough X to remain in front of the

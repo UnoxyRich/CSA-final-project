@@ -20,6 +20,15 @@ public class Main {
         World world = new World(1337L);
         world.setRenderDistance(settings.renderDistance);
         Player player = new Player(new Vector3f(8, 80, 8), settings);
+        // Generation is budgeted per frame, so force the spawn chunk and its
+        // neighbors to exist up front — the player must not spawn into air.
+        int spawnCx = (int) Math.floor(player.position().x / Chunk.SX);
+        int spawnCz = (int) Math.floor(player.position().z / Chunk.SZ);
+        for (int dz = -1; dz <= 1; dz++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                world.chunkAt(spawnCx + dx, spawnCz + dz);
+            }
+        }
         Environment environment = new Environment();
         CommandConsole console = new CommandConsole();
         WorldRenderer worldRenderer = new WorldRenderer();
@@ -86,7 +95,8 @@ public class Main {
             glClearColor(fog.x, fog.y, fog.z, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
             Camera cam = player.camera(window.aspect());
-            worldRenderer.render(world, cam, environment, window.width(), window.height(), player.isUnderwater());
+            worldRenderer.render(world, cam, environment, window.width(), window.height(),
+                                 player.isUnderwater(), settings.rayTracingLighting);
             weatherRenderer.render(world, cam, environment);
             blockEffects.render(cam, dt, player.breakingX(), player.breakingY(), player.breakingZ(),
                                 player.breakProgress());

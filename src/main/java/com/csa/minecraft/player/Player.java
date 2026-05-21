@@ -23,6 +23,8 @@ public class Player {
     private boolean onGround = false;
     private boolean fly = false;
     private float creativeFlyTapTimer = 0f;
+    private float jumpBufferTimer = 0f;
+    private static final float JUMP_BUFFER = 0.12f;
     private GameMode lastMode;
     private int breakX, breakY, breakZ;
     private float breakTimer = 0f;
@@ -74,6 +76,9 @@ public class Player {
             if (input.keyPressed(GLFW_KEY_1 + i)) inv.selected = i;
         }
         boolean jumpPressed = input.keyPressed(GLFW_KEY_SPACE);
+        // Buffer the press for a short window so a 1-frame onGround blip can't eat it.
+        if (jumpPressed) jumpBufferTimer = JUMP_BUFFER;
+        else jumpBufferTimer = Math.max(0f, jumpBufferTimer - dt);
         boolean jumpConsumedByFlyToggle = false;
         if (creative && jumpPressed) {
             if (creativeFlyTapTimer > 0f) {
@@ -120,9 +125,10 @@ public class Player {
             } else {
                 vel.y -= GRAVITY * dt;
             }
-            if (onGround && jumpPressed && !jumpConsumedByFlyToggle) {
+            if (onGround && jumpBufferTimer > 0f && !jumpConsumedByFlyToggle) {
                 vel.y = JUMP;
                 onGround = false;
+                jumpBufferTimer = 0f;
             }
         }
 

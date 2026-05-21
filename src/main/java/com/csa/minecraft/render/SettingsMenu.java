@@ -21,7 +21,7 @@ public class SettingsMenu {
     private boolean open = false;
     private boolean resumeRequested = false;
 
-    private static final int PANEL_W = 460, PANEL_H = 446;
+    private static final int PANEL_W = 460, PANEL_H = 492;
     private static final int ROW_H   = 46;
     private static final int LABEL_SCALE = 2;     // 5x7 glyph → 10x14 px before GUI scale
     private static final int VALUE_SCALE = 2;
@@ -75,8 +75,13 @@ public class SettingsMenu {
                      Settings.GUI_MIN, Settings.GUI_MAX,
                      v -> settings.guiScale = v);
 
-        // Row 5 — game mode
-        if (clicked && inModeRect(cursorPx, cursorPy, panelX, panelW, rowsTop + 5 * rowH)) {
+        // Row 5 — ray traced lighting
+        if (clicked && inToggleRect(cursorPx, cursorPy, panelX, panelW, rowsTop + 5 * rowH)) {
+            settings.rayTracingLighting = !settings.rayTracingLighting;
+        }
+
+        // Row 6 — game mode
+        if (clicked && inModeRect(cursorPx, cursorPy, panelX, panelW, rowsTop + 6 * rowH)) {
             settings.gameMode = settings.gameMode.next();
         }
 
@@ -173,7 +178,9 @@ public class SettingsMenu {
                       Settings.GUI_MIN, Settings.GUI_MAX, settings.guiScale,
                       String.format("%.2f", settings.guiScale),
                       labelScale, valueScale);
-        drawModeRow(hud, panelX, panelW, rowsTop + 5 * rowH, "MODE", settings.gameMode.name(),
+        drawToggleRow(hud, panelX, panelW, rowsTop + 5 * rowH, "RAY TRACING", settings.rayTracingLighting,
+                      labelScale, valueScale);
+        drawModeRow(hud, panelX, panelW, rowsTop + 6 * rowH, "MODE", settings.gameMode.name(),
                     labelScale, valueScale);
 
         // Resume button

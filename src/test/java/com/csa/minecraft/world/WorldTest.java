@@ -126,10 +126,20 @@ class WorldTest {
         assertSame(a, b);
     }
 
+    /** Calls update() until the loaded set stops growing. update() generates
+     *  only a budgeted number of chunks per call, so a full load takes several. */
+    private static void loadFully(World w, Vector3f pos) {
+        int prev = -1;
+        while (w.loaded().size() != prev) {
+            prev = w.loaded().size();
+            w.update(pos);
+        }
+    }
+
     @Test
     void updateLoadsChunksAroundPlayer() {
         World w = new World(7L);
-        w.update(new Vector3f(0, 70, 0));
+        loadFully(w, new Vector3f(0, 70, 0));
         // (2*renderDistance+1)^2 chunks in a square around the player.
         int side = 2 * w.renderDistance() + 1;
         assertEquals(side * side, w.loaded().size());
@@ -138,7 +148,7 @@ class WorldTest {
     @Test
     void setRenderDistanceShrinksLoadedSetOnNextUpdate() {
         World w = new World(7L);
-        w.update(new Vector3f(0, 70, 0));
+        loadFully(w, new Vector3f(0, 70, 0));
         int before = w.loaded().size();
 
         w.setRenderDistance(3);

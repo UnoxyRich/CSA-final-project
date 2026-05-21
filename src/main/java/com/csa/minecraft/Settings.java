@@ -7,6 +7,7 @@ public class Settings {
     public int renderDistance = 6;
     public float guiScale = 1.0f;
     public GameMode gameMode = GameMode.SURVIVAL;
+    public boolean rayTracingLighting = false;
 
     public static final float SENS_MIN = 0.05f, SENS_MAX = 0.50f;
     public static final float FOV_MIN  = 50f,   FOV_MAX  = 110f;

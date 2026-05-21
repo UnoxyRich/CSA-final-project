@@ -6,6 +6,8 @@ import java.util.*;
 
 public class World {
     public static final int DEFAULT_RENDER_DIST = 6;
+    // Cap how many missing chunks are generated per update() to avoid stutter.
+    private static final int GEN_BUDGET = 4;
     private int renderDist = DEFAULT_RENDER_DIST;
     private final Map<Long, Chunk> chunks = new HashMap<>();
     private final TerrainGenerator gen;
@@ -56,9 +58,19 @@ public class World {
         int pcx = (int) Math.floor(playerPos.x / Chunk.SX);
         int pcz = (int) Math.floor(playerPos.z / Chunk.SZ);
         int r = renderDist;
-        for (int dz = -r; dz <= r; dz++) {
-            for (int dx = -r; dx <= r; dx++) {
-                chunkAt(pcx + dx, pcz + dz);
+        // Generate at most GEN_BUDGET missing chunks per update, nearest first
+        // (expanding-ring scan), so entering new terrain doesn't freeze the game.
+        int generated = 0;
+        outer:
+        for (int ring = 0; ring <= r; ring++) {
+            for (int dz = -ring; dz <= ring; dz++) {
+                for (int dx = -ring; dx <= ring; dx++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) continue;
+                    if (!chunks.containsKey(key(pcx + dx, pcz + dz))) {
+                        chunkAt(pcx + dx, pcz + dz);
+                        if (++generated >= GEN_BUDGET) break outer;
+                    }
+                }
             }
         }
         // unload distant
