@@ -32,6 +32,13 @@ gradle run
 
 On macOS the build automatically uses `-XstartOnFirstThread` (required by GLFW).
 
+## Windows auto-launcher
+Run `start.bat` from File Explorer or Command Prompt. It checks for JDK 17 and
+Gradle, installs missing tools with `winget`, then launches the game.
+
+Use `set NO_INSTALL=1` before running it to only check prerequisites, or
+`set ASSUME_YES=1` to auto-accept install prompts.
+
 ## Project structure
 - `engine/`  – Window, Input, Shader, Mesh, Camera, Texture (procedural atlas)
 - `world/`   – Block enum, Chunk, ChunkMesher (face-culling), World (chunk map + streaming), TerrainGenerator (fBm noise)
