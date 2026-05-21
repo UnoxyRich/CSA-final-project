@@ -94,7 +94,11 @@ function Find-Java17Home {
 function Refresh-Path {
     $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    $env:Path = @($machinePath, $userPath, $env:Path) -join ";"
+    $knownUserPaths = @(
+        "$env:LOCALAPPDATA\Microsoft\WindowsApps",
+        "$env:LOCALAPPDATA\Microsoft\WinGet\Links"
+    )
+    $env:Path = @($machinePath, $userPath, $knownUserPaths, $env:Path) -join ";"
 }
 
 function Ensure-Winget {
@@ -149,6 +153,16 @@ function Find-Gradle {
         return $wrapper
     }
 
+    $gradleFromWhere = cmd /c "where gradle.bat 2>nul"
+    if ($LASTEXITCODE -eq 0 -and $gradleFromWhere) {
+        return ($gradleFromWhere | Select-Object -First 1).Trim()
+    }
+
+    $gradleExeFromWhere = cmd /c "where gradle.exe 2>nul"
+    if ($LASTEXITCODE -eq 0 -and $gradleExeFromWhere) {
+        return ($gradleExeFromWhere | Select-Object -First 1).Trim()
+    }
+
     $gradleFromPath = Get-Command gradle.bat -ErrorAction SilentlyContinue
     if ($gradleFromPath) {
         return $gradleFromPath.Source
@@ -161,7 +175,10 @@ function Find-Gradle {
 
     $roots = @(
         "$env:ProgramFiles\Gradle",
-        "${env:ProgramFiles(x86)}\Gradle"
+        "${env:ProgramFiles(x86)}\Gradle",
+        "$env:LOCALAPPDATA\Microsoft\WinGet\Packages",
+        "$env:LOCALAPPDATA\Programs",
+        "$env:LOCALAPPDATA\Gradle"
     ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
 
     foreach ($root in $roots) {
@@ -177,6 +194,20 @@ function Find-Gradle {
     return $null
 }
 
+function Wait-ForGradle {
+    $deadline = (Get-Date).AddSeconds(20)
+    do {
+        Refresh-Path
+        $gradle = Find-Gradle
+        if ($gradle) {
+            return $gradle
+        }
+        Start-Sleep -Seconds 1
+    } while ((Get-Date) -lt $deadline)
+
+    return $null
+}
+
 function Ensure-Gradle {
     $gradle = Find-Gradle
     if ($gradle) {
@@ -185,9 +216,9 @@ function Ensure-Gradle {
 
     Install-WingetPackage -Id "Gradle.Gradle" -Name "Gradle"
 
-    $gradle = Find-Gradle
+    $gradle = Wait-ForGradle
     if (-not $gradle) {
-        throw "Gradle was installed, but this shell could not locate it. Open a new terminal and run start.bat again."
+        throw "Gradle was installed, but this shell could not locate it. Try opening a new Command Prompt and running start.bat again."
     }
 
     return $gradle
