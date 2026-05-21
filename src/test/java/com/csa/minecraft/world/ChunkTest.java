@@ -42,6 +42,18 @@ class ChunkTest {
     }
 
     @Test
+    void metadataRoundTripsAndIsClearedBySet() {
+        Chunk c = new Chunk(0, 0);
+        c.set(1, 2, 3, Block.WATER);
+        c.setMeta(1, 2, 3, 5);
+
+        assertEquals(5, c.getMeta(1, 2, 3));
+
+        c.set(1, 2, 3, Block.STONE);
+        assertEquals(0, c.getMeta(1, 2, 3));
+    }
+
+    @Test
     void outOfBoundsGetReturnsAir() {
         Chunk c = new Chunk(0, 0);
         c.set(0, 0, 0, Block.STONE);

@@ -51,6 +51,28 @@ class WorldTest {
     }
 
     @Test
+    void setBlockChangesBlockRevision() {
+        World w = new World(42L);
+        long before = w.blockRevision();
+
+        w.setBlock(8, 120, 8, Block.STONE);
+
+        assertTrue(w.blockRevision() > before);
+    }
+
+    @Test
+    void removingBlockChangesBlockRevision() {
+        World w = new World(42L);
+        w.setBlock(8, 120, 8, Block.STONE);
+        long beforeRemove = w.blockRevision();
+
+        w.setBlock(8, 120, 8, Block.AIR);
+
+        assertTrue(w.blockRevision() > beforeRemove);
+        assertEquals(Block.AIR, w.getBlock(8, 120, 8));
+    }
+
+    @Test
     void setBlockOnNegativeXBorderMarksWestNeighborDirty() {
         World w = new World(1L);
         // Force both chunks to load (and clear post-generation dirty flags).
@@ -119,6 +141,48 @@ class WorldTest {
     }
 
     @Test
+    void waterFlowsDownIntoAir() {
+        World w = new World(1L);
+        w.chunkAt(0, 0);
+        w.setBlock(8, 122, 8, Block.WATER);
+
+        tickWater(w);
+
+        assertEquals(Block.WATER, w.getBlock(8, 121, 8));
+        assertEquals(8, w.getBlockMeta(8, 121, 8), "downward water should be marked falling");
+    }
+
+    @Test
+    void waterSpreadsSidewaysWhenBlockedBelow() {
+        World w = new World(1L);
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dz = -1; dz <= 1; dz++)
+                w.setBlock(8 + dx, 121, 8 + dz, Block.STONE);
+        w.setBlock(8, 122, 8, Block.WATER);
+
+        tickWater(w);
+
+        assertEquals(Block.WATER, w.getBlock(9, 122, 8));
+        assertEquals(1, w.getBlockMeta(9, 122, 8));
+    }
+
+    @Test
+    void flowingWaterDisappearsAfterSourceIsRemoved() {
+        World w = new World(1L);
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dz = -1; dz <= 1; dz++)
+                w.setBlock(8 + dx, 121, 8 + dz, Block.STONE);
+        w.setBlock(8, 122, 8, Block.WATER);
+        tickWater(w);
+        assertEquals(Block.WATER, w.getBlock(9, 122, 8));
+
+        w.setBlock(8, 122, 8, Block.AIR);
+        tickWater(w);
+
+        assertEquals(Block.AIR, w.getBlock(9, 122, 8));
+    }
+
+    @Test
     void chunkAtIsIdempotent() {
         World w = new World(7L);
         Chunk a = w.chunkAt(2, 3);
@@ -134,6 +198,11 @@ class WorldTest {
             prev = w.loaded().size();
             w.update(pos);
         }
+    }
+
+    private static void tickWater(World w) {
+        Vector3f pos = new Vector3f(8, 122, 8);
+        for (int i = 0; i < 4; i++) w.update(pos);
     }
 
     @Test

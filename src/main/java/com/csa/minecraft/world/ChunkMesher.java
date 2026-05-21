@@ -2,8 +2,7 @@ package com.csa.minecraft.world;
 
 import com.csa.minecraft.engine.Mesh;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Arrays;
 
 public class ChunkMesher {
     // face order: +X, -X, +Y(top), -Y(bottom), +Z, -Z
@@ -25,6 +24,13 @@ public class ChunkMesher {
 
     private static final float[] AO_LEVELS = {0.65f, 0.78f, 0.89f, 1.00f};
 
+    // Hoisted constants: these never change, so allocating them per face (as the
+    // old code did, ~44k times per chunk) was pure garbage. See rebuild().
+    private static final float[][] FACE_UVS = {{0,0},{0,1},{1,1},{1,0}};
+    private static final int[] ORDER_NORMAL = {0, 1, 2, 0, 2, 3};
+    private static final int[] ORDER_FLIP   = {1, 2, 3, 1, 3, 0};
+    private static final int FLOATS_PER_VERTEX = 10; // pos3 + nrm3 + uv2 + ao1 + id1
+
     /** Transparent blocks (glass, water) and cutout leaves don't cast AO. */
     private static boolean isOccluder(Block b) {
         return b.solid && b != Block.GLASS && b != Block.WATER && !isLeaves(b);
@@ -45,9 +51,15 @@ public class ChunkMesher {
     }
 
     public static void rebuild(Chunk c, World world) {
-        List<Float> data = new ArrayList<>(4096);
+        // Write vertices straight into a growable float[]: no Float boxing, no
+        // per-face/per-vertex allocations. The only garbage a rebuild produces
+        // now is this array (and its final trim), which keeps GC pauses, the
+        // main cause of frame-time spikes, to a minimum.
+        float[] data = new float[4096];
+        int len = 0;
         int atlasSize = 8; // must match Texture (8x8 = 64 tiles)
         float uStep = 1f / atlasSize;
+        float[] ao = new float[4]; // reused for every face
         for (int y = 0; y < Chunk.SY; y++) {
             for (int z = 0; z < Chunk.SZ; z++) {
                 for (int x = 0; x < Chunk.SX; x++) {
@@ -74,7 +86,6 @@ public class ChunkMesher {
 
                         // Per-vertex AO: each of the 4 corners samples its 2 edge-adjacent
                         // neighbors + 1 diagonal across the face normal. See vertexAO().
-                        float[] ao = new float[4];
                         for (int k = 0; k < 4; k++) {
                             ao[k] = vertexAO(world, wx, y, wz, f,
                                              (int) vs[k][0], (int) vs[k][1], (int) vs[k][2]);
@@ -83,31 +94,51 @@ public class ChunkMesher {
                         // Flip the quad's triangulation when AO is "twisted" so the gradient
                         // doesn't break across the diagonal seam. Standard Mojang trick.
                         boolean flip = ao[0] + ao[2] < ao[1] + ao[3];
-                        int[] order = flip ? new int[]{1, 2, 3, 1, 3, 0}
-                                           : new int[]{0, 1, 2, 0, 2, 3};
+                        int[] order = flip ? ORDER_FLIP : ORDER_NORMAL;
                         float[] nrm = FACE_NORMALS[f];
-                        float[][] uvs = {{0,0},{0,1},{1,1},{1,0}};
+
+                        // A face emits 6 vertices; grow once up front, then write.
+                        if (len + 6 * FLOATS_PER_VERTEX > data.length) {
+                            data = grow(data, len + 6 * FLOATS_PER_VERTEX);
+                        }
                         for (int k : order) {
-                            float vx = x + vs[k][0];
-                            float vy = y + vs[k][1];
-                            float vz = z + vs[k][2];
-                            data.add(vx); data.add(vy); data.add(vz);
-                            data.add(nrm[0]); data.add(nrm[1]); data.add(nrm[2]);
-                            data.add(u0 + uvs[k][0] * uStep);
-                            data.add(v0 + uvs[k][1] * uStep);
-                            data.add(ao[k]);
-                            data.add((float) b.ordinal());
+                            data[len++] = x + vs[k][0];
+                            data[len++] = y + vertexY(b, c.getMeta(x, y, z), vs[k][1]);
+                            data[len++] = z + vs[k][2];
+                            data[len++] = nrm[0];
+                            data[len++] = nrm[1];
+                            data[len++] = nrm[2];
+                            data[len++] = u0 + FACE_UVS[k][0] * uStep;
+                            data[len++] = v0 + FACE_UVS[k][1] * uStep;
+                            data[len++] = ao[k];
+                            data[len++] = b.ordinal();
                         }
                     }
                 }
             }
         }
-        float[] arr = new float[data.size()];
-        for (int i = 0; i < arr.length; i++) arr[i] = data.get(i);
-        if (c.mesh != null) c.mesh.destroy();
-        c.mesh = new Mesh();
+        float[] arr = (len == data.length) ? data : Arrays.copyOf(data, len);
+        // Reuse the existing Mesh. glBufferData orphans the old store, so we
+        // avoid churning GL buffer/VAO objects (a driver-side stall) every rebuild.
+        if (c.mesh == null) c.mesh = new Mesh();
         c.mesh.upload(arr, new int[]{3, 3, 2, 1, 1});
         c.dirty = false;
+    }
+
+    private static float[] grow(float[] a, int min) {
+        int n = a.length * 2;
+        while (n < min) n *= 2;
+        return Arrays.copyOf(a, n);
+    }
+
+    private static float vertexY(Block b, int meta, float vy) {
+        if (b != Block.WATER || vy <= 0f) return vy;
+        return waterHeight(meta);
+    }
+
+    private static float waterHeight(int meta) {
+        if (meta == 8) return 1.0f;
+        return Math.max(0.2f, 0.9f - meta * 0.1f);
     }
 
     /**
@@ -122,16 +153,12 @@ public class ChunkMesher {
         int faceDir  = (face % 2 == 0) ? 1 : -1;
         int ta = (faceAxis + 1) % 3;
         int tb = (faceAxis + 2) % 3;
-        int[] vert = {vx, vy, vz};
-        int sa = vert[ta] * 2 - 1;          // -1 or +1: which side of the face
-        int sb = vert[tb] * 2 - 1;
+        int sa = comp(vx, vy, vz, ta) * 2 - 1;  // -1 or +1: which side of the face
+        int sb = comp(vx, vy, vz, tb) * 2 - 1;
 
-        int[] step = new int[3];
-        step[faceAxis] = faceDir;
-
-        Block s1 = sample(world, wx, y, wz, step, ta, sa, -1, 0);
-        Block s2 = sample(world, wx, y, wz, step, tb, sb, -1, 0);
-        Block cn = sample(world, wx, y, wz, step, ta, sa, tb, sb);
+        Block s1 = sample(world, wx, y, wz, faceAxis, faceDir, ta, sa, -1, 0);
+        Block s2 = sample(world, wx, y, wz, faceAxis, faceDir, tb, sb, -1, 0);
+        Block cn = sample(world, wx, y, wz, faceAxis, faceDir, ta, sa, tb, sb);
 
         boolean b1 = isOccluder(s1), b2 = isOccluder(s2), bc = isOccluder(cn);
         int level = (b1 && b2) ? 0
@@ -139,9 +166,16 @@ public class ChunkMesher {
         return AO_LEVELS[level];
     }
 
-    private static Block sample(World world, int wx, int y, int wz, int[] step,
+    /** Picks the x/y/z component for a 0/1/2 axis index without an array. */
+    private static int comp(int x, int y, int z, int axis) {
+        return axis == 0 ? x : (axis == 1 ? y : z);
+    }
+
+    private static Block sample(World world, int wx, int y, int wz,
+                                int faceAxis, int faceDir,
                                 int axisA, int signA, int axisB, int signB) {
-        int dx = step[0], dy = step[1], dz = step[2];
+        int dx = 0, dy = 0, dz = 0;
+        if (faceAxis == 0) dx = faceDir; else if (faceAxis == 1) dy = faceDir; else dz = faceDir;
         if (axisA == 0) dx += signA; else if (axisA == 1) dy += signA; else if (axisA == 2) dz += signA;
         if (axisB == 0) dx += signB; else if (axisB == 1) dy += signB; else if (axisB == 2) dz += signB;
         return world.getBlock(wx + dx, y + dy, wz + dz);

@@ -31,6 +31,7 @@ public class WorldRenderer {
     private int rayVolumeTex = 0;
     private int rayVolumeW = 0, rayVolumeH = 0, rayVolumeD = 0;
     private int rayOriginX = Integer.MIN_VALUE, rayOriginY = Integer.MIN_VALUE, rayOriginZ = Integer.MIN_VALUE;
+    private long rayBlockRevision = Long.MIN_VALUE;
     private int rayRingX = 0, rayRingZ = 0;
     private static final int MAX_RAY_VOLUME_XZ = 384;
     private static final int RAY_VOLUME_Y = Chunk.SY;
@@ -38,8 +39,12 @@ public class WorldRenderer {
 
     // Frustum culling: chunks whose bounding box is off-screen are skipped.
     private final FrustumIntersection frustum = new FrustumIntersection();
-    // Cap how many dirty chunk meshes are rebuilt per frame to avoid stutter.
-    private static final int MESH_REBUILD_BUDGET = 3;
+    // Mesh rebuilds are spread over frames: take the nearest dirty chunks (up to
+    // MESH_REBUILD_MAX) and rebuild them until ~4ms is spent. A time budget caps
+    // the worst-case frame spike better than a fixed chunk count, since chunk
+    // rebuild cost varies widely (mostly-air vs. full chunk).
+    private static final int MESH_REBUILD_MAX = 8;
+    private static final long MESH_REBUILD_BUDGET_NS = 4_000_000L;
 
     private static final String VERT = """
         #version 330 core
@@ -605,12 +610,13 @@ public class WorldRenderer {
         }
     }
 
-    // Rebuilds at most MESH_REBUILD_BUDGET dirty chunk meshes per frame,
-    // nearest-to-camera first. Ignores the frustum so off-screen edits still
-    // get remeshed when their turn comes. ChunkMesher.rebuild clears c.dirty.
+    // Rebuilds the nearest-to-camera dirty chunk meshes, stopping once the
+    // per-frame time budget is spent (but always doing at least one, so progress
+    // is guaranteed). Ignores the frustum so off-screen edits still get remeshed
+    // when their turn comes. ChunkMesher.rebuild clears c.dirty.
     private void updateMeshes(World world, Camera cam) {
-        Chunk[] nearest = new Chunk[MESH_REBUILD_BUDGET];
-        long[] bestDist = new long[MESH_REBUILD_BUDGET];
+        Chunk[] nearest = new Chunk[MESH_REBUILD_MAX];
+        long[] bestDist = new long[MESH_REBUILD_MAX];
         java.util.Arrays.fill(bestDist, Long.MAX_VALUE);
         int count = 0;
 
@@ -620,21 +626,23 @@ public class WorldRenderer {
             if (!c.dirty) continue;
             long ddx = c.cx - pcx, ddz = c.cz - pcz;
             long d = ddx * ddx + ddz * ddz;
-            for (int i = 0; i < MESH_REBUILD_BUDGET; i++) {
+            for (int i = 0; i < MESH_REBUILD_MAX; i++) {
                 if (d < bestDist[i]) {
-                    for (int j = MESH_REBUILD_BUDGET - 1; j > i; j--) {
+                    for (int j = MESH_REBUILD_MAX - 1; j > i; j--) {
                         bestDist[j] = bestDist[j - 1];
                         nearest[j] = nearest[j - 1];
                     }
                     bestDist[i] = d;
                     nearest[i] = c;
-                    if (count < MESH_REBUILD_BUDGET) count++;
+                    if (count < MESH_REBUILD_MAX) count++;
                     break;
                 }
             }
         }
+        long start = System.nanoTime();
         for (int i = 0; i < count; i++) {
             ChunkMesher.rebuild(nearest[i], world);
+            if (System.nanoTime() - start >= MESH_REBUILD_BUDGET_NS) break;
         }
     }
 
@@ -697,9 +705,11 @@ public class WorldRenderer {
     private void updateRayVolume(World world, int originX, int originY, int originZ,
                                  int volumeW, int volumeH, int volumeD) {
         boolean resized = ensureRayVolumeTexture(volumeW, volumeH, volumeD);
+        long blockRevision = world.blockRevision();
         boolean invalid = resized
             || rayOriginX == Integer.MIN_VALUE
             || rayOriginY != originY
+            || rayBlockRevision != blockRevision
             || Math.abs(originX - rayOriginX) >= volumeW
             || Math.abs(originZ - rayOriginZ) >= volumeD;
 
@@ -709,6 +719,7 @@ public class WorldRenderer {
             rayOriginX = originX;
             rayOriginY = originY;
             rayOriginZ = originZ;
+            rayBlockRevision = blockRevision;
             uploadWrappedRegion(world, originX, originY, originZ,
                                 volumeW, volumeH, volumeD,
                                 0, 0, volumeW, volumeD);

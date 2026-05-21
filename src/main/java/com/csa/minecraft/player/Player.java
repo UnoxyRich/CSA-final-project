@@ -16,6 +16,14 @@ public class Player {
     public static final float SPEED = 5.0f, FLY_SPEED = 12.0f, JUMP = 9.0f, GRAVITY = 28.0f;
     public static final float REACH = 6.0f;
     private static final float CREATIVE_FLY_TAP_WINDOW = 0.28f;
+    private static final float GROUND_ACCEL = 80.0f;
+    private static final float AIR_ACCEL = 18.0f;
+    private static final float WATER_ACCEL = 14.0f;
+    private static final float ICE_ACCEL = 9.0f;
+    private static final float GROUND_STOP_FRICTION = 0.25f;
+    private static final float AIR_STOP_FRICTION = 0.98f;
+    private static final float WATER_STOP_FRICTION = 0.74f;
+    private static final float ICE_FRICTION = 0.992f;
 
     private final Vector3f pos;
     private final Vector3f vel = new Vector3f();
@@ -108,9 +116,27 @@ public class Player {
         if (wish.lengthSquared() > 0) wish.normalize();
         float waterFactor = inWater && !fly && !spectator ? 0.45f : 1.0f;
         float speed = (spectator ? FLY_SPEED * 1.35f : (fly ? FLY_SPEED : SPEED)) * waterFactor;
-        vel.x = wish.x * speed;
-        vel.y = spectator ? wish.y * speed : vel.y;
-        vel.z = wish.z * speed;
+        float targetX = wish.x * speed;
+        float targetZ = wish.z * speed;
+        if (fly || spectator) {
+            vel.x = targetX;
+            vel.y = spectator ? wish.y * speed : vel.y;
+            vel.z = targetZ;
+        } else {
+            boolean onIce = onGround && isOnIce(world);
+            float accel = inWater ? WATER_ACCEL : (onGround ? (onIce ? ICE_ACCEL : GROUND_ACCEL) : AIR_ACCEL);
+            vel.x = approach(vel.x, targetX, accel * dt);
+            vel.z = approach(vel.z, targetZ, accel * dt);
+            if (wish.lengthSquared() == 0f) {
+                float friction = inWater ? WATER_STOP_FRICTION
+                    : (onGround ? (onIce ? ICE_FRICTION : GROUND_STOP_FRICTION) : AIR_STOP_FRICTION);
+                vel.x *= friction;
+                vel.z *= friction;
+            } else if (onIce) {
+                vel.x *= ICE_FRICTION;
+                vel.z *= ICE_FRICTION;
+            }
+        }
 
         if (fly) {
             if (!spectator) vel.y = 0;
@@ -262,5 +288,23 @@ public class Player {
         return world.getBlock((int) Math.floor(pos.x),
                               (int) Math.floor(pos.y + EYE),
                               (int) Math.floor(pos.z)) == Block.WATER;
+    }
+
+    private boolean isOnIce(World world) {
+        int minX = (int) Math.floor(pos.x - WIDTH / 2);
+        int maxX = (int) Math.floor(pos.x + WIDTH / 2);
+        int y = (int) Math.floor(pos.y - 0.05f);
+        int minZ = (int) Math.floor(pos.z - WIDTH / 2);
+        int maxZ = (int) Math.floor(pos.z + WIDTH / 2);
+        for (int x = minX; x <= maxX; x++)
+            for (int z = minZ; z <= maxZ; z++)
+                if (world.getBlock(x, y, z) == Block.ICE) return true;
+        return false;
+    }
+
+    private static float approach(float value, float target, float maxDelta) {
+        if (value < target) return Math.min(value + maxDelta, target);
+        if (value > target) return Math.max(value - maxDelta, target);
+        return value;
     }
 }
