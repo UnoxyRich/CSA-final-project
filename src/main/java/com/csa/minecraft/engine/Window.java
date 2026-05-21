@@ -42,6 +42,7 @@ public class Window {
     }
 
     public boolean shouldClose() { return glfwWindowShouldClose(handle); }
+    public void requestClose() { glfwSetWindowShouldClose(handle, true); }
     public void swap() {
         glfwSwapBuffers(handle);
         glfwPollEvents();

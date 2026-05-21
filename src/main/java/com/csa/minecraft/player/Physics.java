@@ -33,12 +33,14 @@ public class Physics {
                 // head hit a ceiling — rest it just below the block's underside
                 pos.y = (float) Math.floor(pos.y + h) - h - SKIN;
             } else if (dy < 0) {
+                float impactSpeed = -vel.y;
                 // feet hit ground — rise by whole blocks to the surface landed on
                 // (a single fast frame can drop the feet past more than one block)
                 pos.y = (float) Math.floor(pos.y);
                 while (collides(world, pos, hw, h)) pos.y += 1f;
                 pos.y += SKIN;
                 p.setOnGround(true);
+                p.applyFallDamage(impactSpeed);
             }
             vel.y = 0;
         }

@@ -40,6 +40,10 @@ public class HudRenderer {
     }
 
     public void render(int w, int h, Inventory inv) {
+        render(w, h, inv, 20f, 20f);
+    }
+
+    public void render(int w, int h, Inventory inv, float health, float maxHealth) {
         begin2D(w, h);
         float gui = Math.max(0.1f, settings.guiScale);
 
@@ -48,6 +52,8 @@ public class HudRenderer {
         float armHalf = 10f * gui;
         rect(-pxX * 1, -pxY * armHalf, pxX * 2, pxY * armHalf * 2, 1,1,1,0.9f);
         rect(-pxX * armHalf, -pxY * 1, pxX * armHalf * 2, pxY * 2, 1,1,1,0.9f);
+
+        drawHealthBar(w, h, gui, health, maxHealth);
 
         // hotbar 9 slots along bottom
         int slots = 9;
@@ -73,6 +79,21 @@ public class HudRenderer {
             }
         }
         end2D();
+    }
+
+    private void drawHealthBar(int w, int h, float gui, float health, float maxHealth) {
+        float barW = 182f * gui;
+        float barH = 12f * gui;
+        float x = (w - barW) * 0.5f;
+        float y = h - 92f * gui;
+        float pct = maxHealth <= 0f ? 0f : Math.max(0f, Math.min(1f, health / maxHealth));
+
+        rectPx(x - 2f * gui, y - 2f * gui, barW + 4f * gui, barH + 4f * gui,
+               0.02f, 0.02f, 0.025f, 0.78f);
+        rectPx(x, y, barW, barH, 0.18f, 0.03f, 0.03f, 0.92f);
+        rectPx(x, y, barW * pct, barH, 0.82f, 0.06f, 0.08f, 1f);
+        rectPx(x, y, barW, Math.max(1f, 2f * gui), 1f, 1f, 1f, 0.35f);
+        rectPx(x, y + barH - Math.max(1f, 2f * gui), barW, Math.max(1f, 2f * gui), 0f, 0f, 0f, 0.35f);
     }
 
     public void renderWeatherOverlay(int w, int h, Environment env, float time) {

@@ -1,5 +1,7 @@
 package com.csa.minecraft.player;
 
+import com.csa.minecraft.GameMode;
+import com.csa.minecraft.Settings;
 import com.csa.minecraft.world.Block;
 import com.csa.minecraft.world.World;
 import org.joml.Vector3f;
@@ -52,6 +54,37 @@ class PhysicsTest {
         assertEquals(0f, p.velocity().y, EPS, "vertical velocity zeroed on landing");
         assertTrue(p.position().y >= Y - EPS,
             "feet should not penetrate floor; got y=" + p.position().y);
+    }
+
+    @Test
+    void hardLandingDealsFallDamageInSurvival() {
+        World w = new World(1L);
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dz = -1; dz <= 1; dz++)
+                w.setBlock(8 + dx, Y - 1, 8 + dz, Block.STONE);
+        Player p = new Player(new Vector3f(8.5f, Y + 0.5f, 8.5f));
+        p.velocity().set(0, -20f, 0);
+
+        Physics.moveAndCollide(p, w, 0.2f);
+
+        assertTrue(p.health() < p.maxHealth(), "high-speed landing should damage survival player");
+        assertEquals(14f, p.health(), EPS);
+    }
+
+    @Test
+    void hardLandingDoesNotDamageCreativePlayer() {
+        World w = new World(1L);
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dz = -1; dz <= 1; dz++)
+                w.setBlock(8 + dx, Y - 1, 8 + dz, Block.STONE);
+        Settings settings = new Settings();
+        settings.gameMode = GameMode.CREATIVE;
+        Player p = new Player(new Vector3f(8.5f, Y + 0.5f, 8.5f), settings);
+        p.velocity().set(0, -20f, 0);
+
+        Physics.moveAndCollide(p, w, 0.2f);
+
+        assertEquals(p.maxHealth(), p.health(), EPS);
     }
 
     @Test

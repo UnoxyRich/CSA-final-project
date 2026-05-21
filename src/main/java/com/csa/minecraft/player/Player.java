@@ -15,7 +15,15 @@ public class Player {
     public static final float WIDTH = 0.6f, HEIGHT = 1.8f, EYE = 1.6f;
     public static final float SPEED = 5.0f, FLY_SPEED = 12.0f, JUMP = 9.0f, GRAVITY = 28.0f;
     public static final float REACH = 6.0f;
+    public static final float MAX_HEALTH = 20.0f;
+    private static final float SPRINT_MULTIPLIER = 1.55f;
     private static final float CREATIVE_FLY_TAP_WINDOW = 0.28f;
+    private static final float FALL_DAMAGE_SAFE_SPEED = 13.0f;
+    private static final float FALL_DAMAGE_PER_SPEED = 0.75f;
+    private static final float CACTUS_DAMAGE_INTERVAL = 0.5f;
+    private static final float CACTUS_DAMAGE = 1.0f;
+    private static final float CACTUS_CONTACT_PAD = 0.08f;
+    private static final float DAMAGE_SHAKE_DURATION = 0.28f;
     private static final float GROUND_ACCEL = 80.0f;
     private static final float AIR_ACCEL = 18.0f;
     private static final float WATER_ACCEL = 14.0f;
@@ -40,6 +48,10 @@ public class Player {
     private boolean breakingBlock = false;
     private boolean inWater = false;
     private boolean underwater = false;
+    private boolean sprinting = false;
+    private float cactusDamageTimer = 0f;
+    private float damageShakeTimer = 0f;
+    private float health = MAX_HEALTH;
     private final Inventory inv = new Inventory();
     private final Settings settings;
 
@@ -78,6 +90,8 @@ public class Player {
         underwater = isUnderwater(world);
         if (!creative) creativeFlyTapTimer = 0f;
         else creativeFlyTapTimer = Math.max(0f, creativeFlyTapTimer - dt);
+        cactusDamageTimer = Math.max(0f, cactusDamageTimer - dt);
+        damageShakeTimer = Math.max(0f, damageShakeTimer - dt);
 
         // hotbar select
         for (int i = 0; i < 9; i++) {
@@ -114,8 +128,11 @@ public class Player {
         if (input.key(GLFW_KEY_D)) wish.add(right);
         if (input.key(GLFW_KEY_A)) wish.sub(right);
         if (wish.lengthSquared() > 0) wish.normalize();
+        sprinting = !fly && !spectator && !inWater && input.key(GLFW_KEY_LEFT_CONTROL)
+            && input.key(GLFW_KEY_W) && !input.key(GLFW_KEY_S) && health > 0f;
         float waterFactor = inWater && !fly && !spectator ? 0.45f : 1.0f;
-        float speed = (spectator ? FLY_SPEED * 1.35f : (fly ? FLY_SPEED : SPEED)) * waterFactor;
+        float movementSpeed = SPEED * (sprinting ? SPRINT_MULTIPLIER : 1.0f);
+        float speed = (spectator ? FLY_SPEED * 1.35f : (fly ? FLY_SPEED : movementSpeed)) * waterFactor;
         float targetX = wish.x * speed;
         float targetZ = wish.z * speed;
         if (fly || spectator) {
@@ -164,6 +181,7 @@ public class Player {
         } else {
             Physics.moveAndCollide(this, world, dt);
         }
+        applyCactusContactDamage(world, mode);
 
         // mouse interaction
         Vector3f eye = new Vector3f(pos.x, pos.y + EYE, pos.z);
@@ -192,6 +210,11 @@ public class Player {
     public boolean isBreakingBlock() { return breakingBlock; }
     public boolean isInWater() { return inWater; }
     public boolean isUnderwater() { return underwater; }
+    public boolean isSprinting() { return sprinting; }
+    public float health() { return health; }
+    public float maxHealth() { return MAX_HEALTH; }
+    public boolean isDead() { return health <= 0f; }
+    public float damageShake() { return Math.max(0f, Math.min(1f, damageShakeTimer / DAMAGE_SHAKE_DURATION)); }
     public int breakingX() { return breakX; }
     public int breakingY() { return breakY; }
     public int breakingZ() { return breakZ; }
@@ -212,6 +235,39 @@ public class Player {
     public Camera camera(float aspect) {
         Vector3f eye = new Vector3f(pos.x, pos.y + EYE, pos.z);
         return new Camera(eye, lookDir(), settings.fov, aspect, 0.1f, 500f);
+    }
+
+    void applyFallDamage(float impactSpeed) {
+        if (settings.gameMode != GameMode.SURVIVAL || inWater) return;
+        if (impactSpeed <= FALL_DAMAGE_SAFE_SPEED) return;
+        float damage = (float) Math.ceil((impactSpeed - FALL_DAMAGE_SAFE_SPEED) * FALL_DAMAGE_PER_SPEED);
+        damage(damage);
+    }
+
+    public void heal(float amount) {
+        if (amount <= 0f) return;
+        health = Math.min(MAX_HEALTH, health + amount);
+    }
+
+    public void respawn(Vector3f spawn) {
+        pos.set(spawn);
+        vel.zero();
+        onGround = false;
+        fly = settings.gameMode == GameMode.SPECTATOR;
+        health = MAX_HEALTH;
+        inWater = false;
+        underwater = false;
+        sprinting = false;
+        cactusDamageTimer = 0f;
+        damageShakeTimer = 0f;
+        clearBreaking();
+    }
+
+    private void damage(float amount) {
+        if (amount <= 0f || settings.gameMode != GameMode.SURVIVAL) return;
+        if (health <= 0f) return;
+        health = Math.max(0f, health - amount);
+        damageShakeTimer = DAMAGE_SHAKE_DURATION;
     }
 
     private boolean intersectsPlayer(int bx, int by, int bz) {
@@ -299,6 +355,27 @@ public class Player {
         for (int x = minX; x <= maxX; x++)
             for (int z = minZ; z <= maxZ; z++)
                 if (world.getBlock(x, y, z) == Block.ICE) return true;
+        return false;
+    }
+
+    private void applyCactusContactDamage(World world, GameMode mode) {
+        if (mode != GameMode.SURVIVAL || health <= 0f || cactusDamageTimer > 0f) return;
+        if (!touchesBlock(world, Block.CACTUS, CACTUS_CONTACT_PAD)) return;
+        damage(CACTUS_DAMAGE);
+        cactusDamageTimer = CACTUS_DAMAGE_INTERVAL;
+    }
+
+    private boolean touchesBlock(World world, Block target, float pad) {
+        int minX = (int) Math.floor(pos.x - WIDTH / 2 - pad);
+        int maxX = (int) Math.floor(pos.x + WIDTH / 2 + pad);
+        int minY = (int) Math.floor(pos.y);
+        int maxY = (int) Math.floor(pos.y + HEIGHT);
+        int minZ = (int) Math.floor(pos.z - WIDTH / 2 - pad);
+        int maxZ = (int) Math.floor(pos.z + WIDTH / 2 + pad);
+        for (int x = minX; x <= maxX; x++)
+            for (int y = minY; y <= maxY; y++)
+                for (int z = minZ; z <= maxZ; z++)
+                    if (world.getBlock(x, y, z) == target) return true;
         return false;
     }
 

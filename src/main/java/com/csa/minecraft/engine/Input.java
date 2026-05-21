@@ -14,6 +14,10 @@ public class Input {
     private boolean[] curKeys = new boolean[GLFW_KEY_LAST + 1];
     private boolean prevLeft, prevRight, curLeft, curRight;
 
+    protected Input() {
+        this.window = 0;
+    }
+
     public Input(long window) {
         this.window = window;
         grabCursor(true);
