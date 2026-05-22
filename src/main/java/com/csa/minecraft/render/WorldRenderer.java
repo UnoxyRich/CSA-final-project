@@ -2,6 +2,7 @@ package com.csa.minecraft.render;
 
 import com.csa.minecraft.Environment;
 import com.csa.minecraft.engine.Camera;
+import com.csa.minecraft.engine.ChunkWorkerPool;
 import com.csa.minecraft.engine.Mesh;
 import com.csa.minecraft.engine.Shader;
 import com.csa.minecraft.engine.Texture;
@@ -15,6 +16,9 @@ import org.joml.Vector4f;
 import org.lwjgl.BufferUtils;
 
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL12.*;
@@ -27,6 +31,7 @@ public class WorldRenderer {
     private final Shader rayShader;
     private final Texture atlas;
     private final Texture photonNoise;
+    private final Texture sunPortrait;
     private final Mesh screenQuad;
     private int rayVolumeTex = 0;
     private int rayVolumeW = 0, rayVolumeH = 0, rayVolumeD = 0;
@@ -39,12 +44,17 @@ public class WorldRenderer {
 
     // Frustum culling: chunks whose bounding box is off-screen are skipped.
     private final FrustumIntersection frustum = new FrustumIntersection();
-    // Mesh rebuilds are spread over frames: take the nearest dirty chunks (up to
-    // MESH_REBUILD_MAX) and rebuild them until ~4ms is spent. A time budget caps
-    // the worst-case frame spike better than a fixed chunk count, since chunk
-    // rebuild cost varies widely (mostly-air vs. full chunk).
-    private static final int MESH_REBUILD_MAX = 8;
-    private static final long MESH_REBUILD_BUDGET_NS = 4_000_000L;
+
+    // Mesh building runs on the worker pool; only the GL upload stays on this
+    // thread. Each frame the nearest dirty chunks (up to MESH_DISPATCH_MAX) are
+    // handed to workers, and finished vertex arrays are uploaded here within a
+    // time budget so a burst of completions can't spike one frame.
+    private final ChunkWorkerPool workers;
+    private static final int MESH_DISPATCH_MAX = 12;
+    private static final long MESH_UPLOAD_BUDGET_NS = 3_000_000L;
+    /** A chunk's vertex array, built off-thread, waiting for a GL upload here. */
+    private record MeshResult(Chunk chunk, float[] data) {}
+    private final ConcurrentLinkedQueue<MeshResult> meshResults = new ConcurrentLinkedQueue<>();
 
     private static final String VERT = """
         #version 330 core
@@ -179,6 +189,7 @@ public class WorldRenderer {
         in vec2 vPos;
         out vec4 fragColor;
         uniform sampler2D uPhotonNoise;
+        uniform sampler2D uSunPortrait;
         uniform vec3 uSkyTop;
         uniform vec3 uSkyHorizon;
         uniform vec2 uSunScreen;
@@ -202,8 +213,16 @@ public class WorldRenderer {
             vec2 s = vec2(uSunScreen.x * uAspect, uSunScreen.y);
             vec2 m = vec2(uMoonScreen.x * uAspect, uMoonScreen.y);
             float d = length(p - s);
-            float sunDisc = smoothstep(0.08, 0.0, d);
-            float glow = exp(-d * 3.2);
+            vec2 portraitUv = (p - s) / vec2(0.18, 0.18) + vec2(0.5);
+            float inPortrait = step(0.0, portraitUv.x) * step(portraitUv.x, 1.0)
+                              * step(0.0, portraitUv.y) * step(portraitUv.y, 1.0);
+            float portraitEdge = smoothstep(0.0, 0.08, portraitUv.x)
+                               * smoothstep(0.0, 0.08, portraitUv.y)
+                               * smoothstep(0.0, 0.08, 1.0 - portraitUv.x)
+                               * smoothstep(0.0, 0.08, 1.0 - portraitUv.y);
+            vec3 portrait = texture(uSunPortrait, vec2(portraitUv.x, 1.0 - portraitUv.y)).rgb;
+            float portraitMask = inPortrait * portraitEdge;
+            float glow = exp(-d * 4.2);
             float rayMask = max(0.0, 1.0 - d * 0.82);
             float rays = 0.0;
             vec2 rayDir = normalize(p - s + vec2(0.0001, 0.0001));
@@ -231,7 +250,8 @@ public class WorldRenderer {
             cloudShade += uRain * smoothstep(0.42, 0.88, photonCloud) * 0.10;
             sky *= 1.0 - cloudShade - uThunder * 0.10;
             sky += vec3(0.62, 0.72, 1.0) * star * (0.25 + hash(starSeed + 4.0) * 0.75) * twinkle;
-            sky += uSunDiskColor * uSunVisible * (sunDisc * 0.72 + glow * 0.12);
+            sky += vec3(1.0, 0.70, 0.20) * uSunVisible * glow * 0.16;
+            sky = mix(sky, portrait, uSunVisible * portraitMask);
             sky += vec3(1.0, 0.88, 0.58) * uSunVisible * rays * (1.0 - uRain) * 0.075;
             sky += vec3(0.62, 0.72, 0.98) * uMoonVisible * (moonDisc * 0.50 + moonGlow * 0.045);
             vec3 mappedSky = sky / (sky + vec3(0.58));
@@ -518,12 +538,16 @@ public class WorldRenderer {
         }
         """;
 
-    public WorldRenderer() {
+    public WorldRenderer(ChunkWorkerPool workers) {
+        this.workers = workers;
         shader = new Shader(VERT, FRAG);
         skyShader = new Shader(SKY_VERT, SKY_FRAG);
         rayShader = new Shader(SKY_VERT, RAY_FRAG);
         atlas = Texture.buildBlockAtlas();
         photonNoise = Texture.buildPhotonNoise();
+        sunPortrait = Files.isRegularFile(Path.of("images.jpg"))
+            ? Texture.loadImage(Path.of("images.jpg"), false, true)
+            : Texture.buildPhotonNoise();
         screenQuad = new Mesh();
         screenQuad.upload(new float[]{
             -1, -1,  1, -1,  1, 1,
@@ -610,39 +634,59 @@ public class WorldRenderer {
         }
     }
 
-    // Rebuilds the nearest-to-camera dirty chunk meshes, stopping once the
-    // per-frame time budget is spent (but always doing at least one, so progress
-    // is guaranteed). Ignores the frustum so off-screen edits still get remeshed
-    // when their turn comes. ChunkMesher.rebuild clears c.dirty.
+    // Uploads vertex arrays that workers have finished, then hands the nearest
+    // dirty chunks to the pool to be (re)built. The frustum is ignored when
+    // picking chunks so off-screen edits still get remeshed when their turn
+    // comes. Heavy meshing work is off-thread; only the GL upload runs here.
     private void updateMeshes(World world, Camera cam) {
-        Chunk[] nearest = new Chunk[MESH_REBUILD_MAX];
-        long[] bestDist = new long[MESH_REBUILD_MAX];
+        // Upload finished meshes, oldest first, capped by a time budget. The
+        // budget check is after each upload, so at least one always lands.
+        long uploadStart = System.nanoTime();
+        MeshResult result;
+        while ((result = meshResults.poll()) != null) {
+            Chunk c = result.chunk();
+            c.meshing = false;
+            if (c.unloaded) continue; // chunk was unloaded while its job ran
+            if (c.mesh == null) c.mesh = new Mesh();
+            // glBufferData orphans the old store, so reusing the Mesh avoids
+            // churning GL buffer/VAO objects (a driver-side stall) every build.
+            c.mesh.upload(result.data(), ChunkMesher.LAYOUT);
+            if (System.nanoTime() - uploadStart >= MESH_UPLOAD_BUDGET_NS) break;
+        }
+
+        // Pick the nearest dirty, not-already-meshing chunks for this frame.
+        Chunk[] nearest = new Chunk[MESH_DISPATCH_MAX];
+        long[] bestDist = new long[MESH_DISPATCH_MAX];
         java.util.Arrays.fill(bestDist, Long.MAX_VALUE);
         int count = 0;
 
         int pcx = (int) Math.floor(cam.pos.x / Chunk.SX);
         int pcz = (int) Math.floor(cam.pos.z / Chunk.SZ);
         for (Chunk c : world.loaded()) {
-            if (!c.dirty) continue;
+            if (!c.dirty || c.meshing) continue;
             long ddx = c.cx - pcx, ddz = c.cz - pcz;
             long d = ddx * ddx + ddz * ddz;
-            for (int i = 0; i < MESH_REBUILD_MAX; i++) {
+            for (int i = 0; i < MESH_DISPATCH_MAX; i++) {
                 if (d < bestDist[i]) {
-                    for (int j = MESH_REBUILD_MAX - 1; j > i; j--) {
+                    for (int j = MESH_DISPATCH_MAX - 1; j > i; j--) {
                         bestDist[j] = bestDist[j - 1];
                         nearest[j] = nearest[j - 1];
                     }
                     bestDist[i] = d;
                     nearest[i] = c;
-                    if (count < MESH_REBUILD_MAX) count++;
+                    if (count < MESH_DISPATCH_MAX) count++;
                     break;
                 }
             }
         }
-        long start = System.nanoTime();
+        // Dispatch to the worker pool. dirty is cleared *before* dispatch so an
+        // edit during the build re-sets it and the chunk is simply remeshed
+        // once this in-flight job returns (meshing guards against double work).
         for (int i = 0; i < count; i++) {
-            ChunkMesher.rebuild(nearest[i], world);
-            if (System.nanoTime() - start >= MESH_REBUILD_BUDGET_NS) break;
+            Chunk c = nearest[i];
+            c.dirty = false;
+            c.meshing = true;
+            workers.submit(() -> meshResults.add(new MeshResult(c, ChunkMesher.buildMesh(c, world))));
         }
     }
 
@@ -831,6 +875,8 @@ public class WorldRenderer {
         skyShader.use();
         photonNoise.bind(1);
         skyShader.setInt("uPhotonNoise", 1);
+        sunPortrait.bind(2);
+        skyShader.setInt("uSunPortrait", 2);
         Vector3f top = underwater ? new Vector3f(0.02f, 0.16f, 0.34f) : env.skyTop();
         Vector3f horizon = underwater ? new Vector3f(0.04f, 0.24f, 0.45f) : env.skyHorizon();
         skyShader.setVec3("uSkyTop", top.x, top.y, top.z);

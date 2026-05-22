@@ -11,7 +11,17 @@ public class Chunk {
     // for every other block. Chunk.set() clears it.
     private final byte[] meta = new byte[SX * SY * SZ];
     public Mesh mesh;
-    public boolean dirty = true;
+    // dirty/unloaded cross the worker/main boundary, so they are volatile:
+    // a generation worker fills a chunk and an integrated chunk may be unloaded
+    // while a mesh job for it is still in flight.
+    public volatile boolean dirty = true;
+    public volatile boolean unloaded = false;
+    // True while a mesh-build job for this chunk is queued/running on a worker.
+    // Main-thread only — guards against dispatching the same chunk twice.
+    public boolean meshing = false;
+    // Count of WATER cells in this chunk, kept current by set(). Lets the water
+    // simulation skip the full-volume scan of chunks that hold no water.
+    public int waterCount = 0;
 
     public Chunk(int cx, int cz) { this.cx = cx; this.cz = cz; }
 
@@ -26,6 +36,9 @@ public class Chunk {
     public void set(int x, int y, int z, Block b) {
         if (!inBounds(x, y, z)) return;
         int i = idx(x, y, z);
+        Block old = Block.byId(blocks[i] & 0xff);
+        if (old == Block.WATER && b != Block.WATER) waterCount--;
+        else if (old != Block.WATER && b == Block.WATER) waterCount++;
         blocks[i] = (byte) b.ordinal();
         meta[i] = 0; // metadata never outlives the block it described
         dirty = true;

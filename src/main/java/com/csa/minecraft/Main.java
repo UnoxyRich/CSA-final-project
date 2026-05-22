@@ -9,6 +9,7 @@ import org.joml.Vector3f;
 
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE;
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_SLASH;
+import static org.lwjgl.glfw.GLFW.GLFW_KEY_T;
 import static org.lwjgl.opengl.GL11.*;
 
 public class Main {
@@ -29,12 +30,17 @@ public class Main {
         long currentSeed = WORLD_SEED;
         Environment environment = new Environment();
         CommandConsole console = new CommandConsole();
-        WorldRenderer worldRenderer = new WorldRenderer();
+        // Worker pool for off-thread chunk generation and mesh building. One
+        // pool for the whole process, shared by every World that gets created.
+        ChunkWorkerPool workers = new ChunkWorkerPool();
+        System.out.println("Chunk worker pool: " + workers.threadCount() + " threads");
+        WorldRenderer worldRenderer = new WorldRenderer(workers);
         WeatherRenderer weatherRenderer = new WeatherRenderer();
         MilkFrogRenderer milkFrogRenderer = new MilkFrogRenderer();
         BlockEffectsRenderer blockEffects = new BlockEffectsRenderer();
         HudRenderer hud = new HudRenderer(settings);
         SettingsMenu menu = new SettingsMenu(settings);
+        ChatOverlay chat = new ChatOverlay(settings);
         DeathScreen deathScreen = new DeathScreen(settings);
         StartScreen startScreen = new StartScreen(settings);
         input.grabCursor(false);
@@ -63,7 +69,7 @@ public class Main {
                     currentSeed = action == StartScreen.Action.CREATE_RANDOM_WORLD
                         ? System.nanoTime()
                         : WORLD_SEED;
-                    world = new World(currentSeed);
+                    world = new World(currentSeed, workers);
                     world.setRenderDistance(settings.renderDistance);
                     Vector3f spawn = prepareSpawn(world);
                     player = new Player(new Vector3f(spawn), settings);
@@ -77,6 +83,7 @@ public class Main {
             } else if (!deathScreen.isOpen() && player != null && player.isDead()) {
                 deathScreen.open();
                 menu.close();
+                chat.close();
                 console.close();
                 input.grabCursor(false);
             }
@@ -86,7 +93,7 @@ public class Main {
                                                                input.cursorX(), input.cursorY(),
                                                                input.leftClick());
                 if (action == DeathScreen.Action.REVIVE_AND_RESET) {
-                    world = new World(currentSeed);
+                    world = new World(currentSeed, workers);
                     world.setRenderDistance(settings.renderDistance);
                     Vector3f spawn = prepareSpawn(world);
                     player.respawn(new Vector3f(spawn));
@@ -97,6 +104,9 @@ public class Main {
                 } else if (action == DeathScreen.Action.QUIT) {
                     window.requestClose();
                 }
+            } else if (chat.isOpen()) {
+                chat.update(input);
+                if (!chat.isOpen()) input.grabCursor(true);
             } else if (console.active()) {
                 console.update(input);
                 String command = console.consumeSubmitted();
@@ -109,6 +119,9 @@ public class Main {
             } else if (!menu.isOpen() && input.keyPressed(GLFW_KEY_SLASH)) {
                 console.open(input);
                 input.grabCursor(false);
+            } else if (!menu.isOpen() && input.keyPressed(GLFW_KEY_T)) {
+                chat.open(input);
+                input.grabCursor(false);
             } else if (input.keyPressed(GLFW_KEY_ESCAPE)) {
                 // ESC toggles the settings menu. Opening the menu ungrabs the cursor;
                 // closing it re-grabs and pauses are released.
@@ -117,6 +130,8 @@ public class Main {
             }
             if (startScreen.isOpen()) {
                 // Start screen owns input until a world is created.
+            } else if (chat.isOpen()) {
+                // Chat owns typing until closed.
             } else if (console.active()) {
                 // Commands pause world input until submitted or cancelled.
             } else if (deathScreen.isOpen()) {
@@ -125,7 +140,7 @@ public class Main {
                 // Do not let the menu button click also act as a world click.
             } else if (menu.isOpen()) {
                 menu.update(window.width(), window.height(),
-                            input.cursorX(), input.cursorY(), input.leftClick());
+                            input.cursorX(), input.cursorY(), input.leftClick(), input);
                 if (menu.resumeRequested()) {
                     menu.close();
                     input.grabCursor(true);
@@ -168,6 +183,7 @@ public class Main {
                 }
             }
             menu.render(hud, window.width(), window.height());
+            chat.render(hud, window.width(), window.height());
             deathScreen.render(hud, window.width(), window.height());
             startScreen.render(hud, window.width(), window.height());
 
@@ -178,6 +194,7 @@ public class Main {
                 frames = 0; fpsTimer = 0;
             }
         }
+        workers.shutdown();
         window.destroy();
     }
 

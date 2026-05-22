@@ -1,10 +1,11 @@
 package com.csa.minecraft.world;
 
-import com.csa.minecraft.engine.Mesh;
-
 import java.util.Arrays;
 
 public class ChunkMesher {
+    /** Vertex attribute layout of the array buildMesh() returns: pos3, nrm3, uv2, ao1, id1. */
+    public static final int[] LAYOUT = {3, 3, 2, 1, 1};
+
     // face order: +X, -X, +Y(top), -Y(bottom), +Z, -Z
     private static final int[][] OFFSETS = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
 
@@ -50,9 +51,15 @@ public class ChunkMesher {
         return b == Block.LEAVES || b == Block.CHERRY_LEAVES || b == Block.SPRUCE_LEAVES;
     }
 
-    public static void rebuild(Chunk c, World world) {
+    /**
+     * Builds the interleaved vertex array for a chunk and returns it. This is
+     * pure CPU work — it only reads block data — so it runs on a worker thread.
+     * The caller uploads the result to a GL buffer on the main thread (see
+     * {@link #LAYOUT}); GL objects must never be touched off the GL thread.
+     */
+    public static float[] buildMesh(Chunk c, World world) {
         // Write vertices straight into a growable float[]: no Float boxing, no
-        // per-face/per-vertex allocations. The only garbage a rebuild produces
+        // per-face/per-vertex allocations. The only garbage a build produces
         // now is this array (and its final trim), which keeps GC pauses, the
         // main cause of frame-time spikes, to a minimum.
         float[] data = new float[4096];
@@ -117,12 +124,7 @@ public class ChunkMesher {
                 }
             }
         }
-        float[] arr = (len == data.length) ? data : Arrays.copyOf(data, len);
-        // Reuse the existing Mesh. glBufferData orphans the old store, so we
-        // avoid churning GL buffer/VAO objects (a driver-side stall) every rebuild.
-        if (c.mesh == null) c.mesh = new Mesh();
-        c.mesh.upload(arr, new int[]{3, 3, 2, 1, 1});
-        c.dirty = false;
+        return (len == data.length) ? data : Arrays.copyOf(data, len);
     }
 
     private static float[] grow(float[] a, int min) {

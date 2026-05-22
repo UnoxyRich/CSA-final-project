@@ -8,6 +8,7 @@ public class Settings {
     public float guiScale = 1.0f;
     public GameMode gameMode = GameMode.SURVIVAL;
     public boolean rayTracingLighting = false;
+    public String deepSeekApiKey = "";
 
     public static final float SENS_MIN = 0.05f, SENS_MAX = 0.50f;
     public static final float FOV_MIN  = 50f,   FOV_MAX  = 110f;

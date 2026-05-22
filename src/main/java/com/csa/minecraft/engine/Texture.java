@@ -53,6 +53,21 @@ public class Texture {
         return buildNoiseFallback();
     }
 
+    public static Texture loadImage(Path path, boolean repeat, boolean linear) {
+        try {
+            byte[] bytes = Files.readAllBytes(path);
+            ByteBuffer encoded = memAlloc(bytes.length);
+            encoded.put(bytes).flip();
+            int[] w = new int[1], h = new int[1], comp = new int[1];
+            ByteBuffer rgba = stbi_load_from_memory(encoded, w, h, comp, 4);
+            memFree(encoded);
+            if (rgba == null) throw new IllegalArgumentException("could not decode " + path);
+            return uploadImage(new Image(rgba, w[0], h[0], true), repeat, linear);
+        } catch (Exception e) {
+            throw new RuntimeException("failed to load texture " + path + ": " + e.getMessage(), e);
+        }
+    }
+
     /** Build a procedural texture atlas: 8x8 tiles, each 16x16. */
     public static Texture buildProcedural() {
         int tile = 16, cols = 8;

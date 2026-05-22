@@ -1,24 +1,39 @@
 package com.csa.minecraft.world;
 
+import com.csa.minecraft.engine.ChunkWorkerPool;
 import org.joml.Vector3f;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class World {
     public static final int DEFAULT_RENDER_DIST = 6;
-    // Cap how many missing chunks are generated per update() to avoid stutter.
-    private static final int GEN_BUDGET = 4;
     private static final int WATER_MAX_LEVEL = 7;
     private static final int WATER_FALLING = 8;
     private static final int WATER_TICK_INTERVAL = 4;
     private static final int WATER_SIM_DIST = 3;
     private int renderDist = DEFAULT_RENDER_DIST;
-    private final Map<Long, Chunk> chunks = new HashMap<>();
+    // ConcurrentHashMap because worker threads read it (getBlock during async
+    // meshing) while the main thread inserts/removes chunks. Only the main
+    // thread ever mutates the map; workers only read.
+    private final Map<Long, Chunk> chunks = new ConcurrentHashMap<>();
     private final TerrainGenerator gen;
+    private final ChunkWorkerPool workers;
+    // Keys of chunks currently being generated on a worker — prevents the ring
+    // scan from submitting the same chunk twice.
+    private final Set<Long> generating = ConcurrentHashMap.newKeySet();
+    // Chunks finished by workers, awaiting integration into the map on the
+    // main thread. ConcurrentLinkedQueue establishes the happens-before that
+    // publishes every block write a worker made before integration reads it.
+    private final ConcurrentLinkedQueue<Chunk> generated = new ConcurrentLinkedQueue<>();
     private int waterTickCounter = 0;
     private long blockRevision = 0;
 
-    public World(long seed) { this.gen = new TerrainGenerator(seed); }
+    public World(long seed, ChunkWorkerPool workers) {
+        this.gen = new TerrainGenerator(seed);
+        this.workers = workers;
+    }
 
     public int renderDistance() { return renderDist; }
     public void setRenderDistance(int d) { this.renderDist = Math.max(1, d); }
@@ -95,31 +110,56 @@ public class World {
         int pcx = (int) Math.floor(playerPos.x / Chunk.SX);
         int pcz = (int) Math.floor(playerPos.z / Chunk.SZ);
         int r = renderDist;
-        // Generate at most GEN_BUDGET missing chunks per update, nearest first
-        // (expanding-ring scan), so entering new terrain doesn't freeze the game.
-        int generated = 0;
-        outer:
-        for (int ring = 0; ring <= r; ring++) {
-            for (int dz = -ring; dz <= ring; dz++) {
-                for (int dx = -ring; dx <= ring; dx++) {
-                    if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) continue;
-                    if (!chunks.containsKey(key(pcx + dx, pcz + dz))) {
-                        chunkAt(pcx + dx, pcz + dz);
-                        if (++generated >= GEN_BUDGET) break outer;
-                    }
-                }
+
+        // 1. Integrate chunks finished by worker threads. This is cheap (map
+        // puts + dirty flags), so the whole queue is drained every frame. If a
+        // synchronous chunkAt() already created the chunk, putIfAbsent keeps it
+        // and the worker's copy is discarded.
+        Chunk done;
+        while ((done = generated.poll()) != null) {
+            long k = key(done.cx, done.cz);
+            generating.remove(k);
+            if (chunks.putIfAbsent(k, done) == null) {
+                // Neighbours must remesh so their shared border faces cull
+                // against the freshly arrived chunk instead of showing seams.
+                markDirty(done.cx - 1, done.cz);
+                markDirty(done.cx + 1, done.cz);
+                markDirty(done.cx, done.cz - 1);
+                markDirty(done.cx, done.cz + 1);
             }
         }
-        // unload distant
+
+        // 2. Unload chunks outside the keep radius.
         int unloadR = r + 2;
         chunks.entrySet().removeIf(e -> {
             Chunk c = e.getValue();
             if (Math.abs(c.cx - pcx) > unloadR || Math.abs(c.cz - pcz) > unloadR) {
+                c.unloaded = true; // a mesh job for it may still be in flight
                 if (c.mesh != null) c.mesh.destroy();
                 return true;
             }
             return false;
         });
+
+        // 3. Queue generation for every missing in-range chunk, nearest ring
+        // first. Generation runs on the worker pool, so there is no per-frame
+        // cap; the `generating` set stops a chunk being submitted twice.
+        for (int ring = 0; ring <= r; ring++) {
+            for (int dz = -ring; dz <= ring; dz++) {
+                for (int dx = -ring; dx <= ring; dx++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) continue;
+                    int cx = pcx + dx, cz = pcz + dz;
+                    long k = key(cx, cz);
+                    if (chunks.containsKey(k) || !generating.add(k)) continue;
+                    workers.submit(() -> {
+                        Chunk c = new Chunk(cx, cz);
+                        gen.generate(c);
+                        generated.add(c);
+                    });
+                }
+            }
+        }
+
         if (++waterTickCounter >= WATER_TICK_INTERVAL) {
             waterTickCounter = 0;
             updateWater(pcx, pcz);
@@ -130,7 +170,7 @@ public class World {
         Map<Long, Integer> desired = new HashMap<>();
         ArrayDeque<WaterNode> queue = new ArrayDeque<>();
         for (Chunk c : chunks.values()) {
-            if (!waterChunkInRange(c, pcx, pcz)) continue;
+            if (!waterChunkInRange(c, pcx, pcz) || c.waterCount == 0) continue;
             for (int y = 0; y < Chunk.SY; y++) {
                 for (int z = 0; z < Chunk.SZ; z++) {
                     for (int x = 0; x < Chunk.SX; x++) {
@@ -162,7 +202,7 @@ public class World {
 
         List<long[]> removals = new ArrayList<>();
         for (Chunk c : chunks.values()) {
-            if (!waterChunkInRange(c, pcx, pcz)) continue;
+            if (!waterChunkInRange(c, pcx, pcz) || c.waterCount == 0) continue;
             for (int y = 0; y < Chunk.SY; y++) {
                 for (int z = 0; z < Chunk.SZ; z++) {
                     for (int x = 0; x < Chunk.SX; x++) {

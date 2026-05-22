@@ -1,6 +1,9 @@
 package com.csa.minecraft.render;
 
 import com.csa.minecraft.Settings;
+import com.csa.minecraft.engine.Input;
+
+import static org.lwjgl.glfw.GLFW.*;
 
 /**
  * Pause-screen overlay with sliders + a toggle + a resume button. Everything lays out in
@@ -11,7 +14,7 @@ import com.csa.minecraft.Settings;
  * so the menu honors the GUI scale setting live.
  *
  * Call order each frame (when open):
- *   menu.update(viewW, viewH, cursorPx, cursorPy, clickPressed)
+ *   menu.update(viewW, viewH, cursorPx, cursorPy, clickPressed, input)
  *   menu.render(hud, viewW, viewH)
  *
  * {@link #resumeRequested()} flips to true on the frame the user clicks "RESUME".
@@ -20,8 +23,9 @@ public class SettingsMenu {
     private final Settings settings;
     private boolean open = false;
     private boolean resumeRequested = false;
+    private boolean apiKeyEditing = false;
 
-    private static final int PANEL_W = 460, PANEL_H = 492;
+    private static final int PANEL_W = 520, PANEL_H = 548;
     private static final int ROW_H   = 46;
     private static final int LABEL_SCALE = 2;     // 5x7 glyph → 10x14 px before GUI scale
     private static final int VALUE_SCALE = 2;
@@ -32,13 +36,13 @@ public class SettingsMenu {
 
     public boolean isOpen() { return open; }
     public void open() { open = true; resumeRequested = false; }
-    public void close() { open = false; }
+    public void close() { open = false; apiKeyEditing = false; }
     public boolean resumeRequested() { return resumeRequested; }
 
     /** Scale a base pixel constant by the current GUI scale, never below 1. */
     private int s(int v) { return Math.max(1, Math.round(v * settings.guiScale)); }
 
-    public void update(int viewW, int viewH, double cursorPx, double cursorPy, boolean clicked) {
+    public void update(int viewW, int viewH, double cursorPx, double cursorPy, boolean clicked, Input input) {
         if (!open) return;
         resumeRequested = false;
         int panelW = s(PANEL_W), panelH = s(PANEL_H);
@@ -85,12 +89,39 @@ public class SettingsMenu {
             settings.gameMode = settings.gameMode.next();
         }
 
+        int keyY = rowsTop + 7 * rowH;
+        if (clicked) apiKeyEditing = inApiKeyRect(cursorPx, cursorPy, panelX, panelW, keyY);
+        if (apiKeyEditing) updateApiKey(input);
+
         // Resume button
         int btnW = s(160), btnH = s(36);
         int btnX = panelX + (panelW - btnW) / 2;
         int btnY = panelY + panelH - padding - btnH;
         if (clicked && in(cursorPx, cursorPy, btnX, btnY, btnW, btnH)) {
             resumeRequested = true;
+        }
+    }
+
+    private void updateApiKey(Input input) {
+        if (input.commandOrControlDown() && input.keyPressed(GLFW_KEY_V)) {
+            appendApiKeyText(input.clipboardText());
+            input.clearTypedChars();
+        } else {
+            appendApiKeyText(input.consumeTypedChars());
+        }
+        if (input.keyPressed(GLFW_KEY_BACKSPACE) && !settings.deepSeekApiKey.isEmpty()) {
+            settings.deepSeekApiKey = settings.deepSeekApiKey.substring(0, settings.deepSeekApiKey.length() - 1);
+        }
+        if (input.keyPressed(GLFW_KEY_ENTER) || input.keyPressed(GLFW_KEY_KP_ENTER)
+                || input.keyPressed(GLFW_KEY_ESCAPE)) {
+            apiKeyEditing = false;
+        }
+    }
+
+    private void appendApiKeyText(String text) {
+        for (int i = 0; i < text.length() && settings.deepSeekApiKey.length() < 160; i++) {
+            char c = text.charAt(i);
+            if (c >= 32 && c < 127) settings.deepSeekApiKey += c;
         }
     }
 
@@ -125,6 +156,15 @@ public class SettingsMenu {
         int boxW = s(150), boxH = s(26);
         int boxX = panelX + panelW - padding - boxW;
         int boxY = rowY + s(14);
+        return in(cx, cy, boxX, boxY, boxW, boxH);
+    }
+
+    private boolean inApiKeyRect(double cx, double cy, int panelX, int panelW, int rowY) {
+        int padding = s(PADDING);
+        int boxW = panelW - 2 * padding;
+        int boxH = s(28);
+        int boxX = panelX + padding;
+        int boxY = rowY + s(18);
         return in(cx, cy, boxX, boxY, boxW, boxH);
     }
 
@@ -182,6 +222,7 @@ public class SettingsMenu {
                       labelScale, valueScale);
         drawModeRow(hud, panelX, panelW, rowsTop + 6 * rowH, "MODE", settings.gameMode.name(),
                     labelScale, valueScale);
+        drawApiKeyRow(hud, panelX, panelW, rowsTop + 7 * rowH, labelScale, valueScale);
 
         // Resume button
         int btnW = s(160), btnH = s(36);
@@ -196,6 +237,33 @@ public class SettingsMenu {
                      valueScale, 1, 1, 1, 1);
 
         hud.end2D();
+    }
+
+    private void drawApiKeyRow(HudRenderer hud, int panelX, int panelW, int rowY,
+                               int labelScale, int valueScale) {
+        int padding = s(PADDING);
+        hud.drawText("DEEPSEEK API KEY", panelX + padding, rowY, labelScale, 1, 1, 1, 1);
+        int boxW = panelW - 2 * padding;
+        int boxH = s(28);
+        int boxX = panelX + padding;
+        int boxY = rowY + s(18);
+        hud.rectPx(boxX, boxY, boxW, boxH, 0.06f, 0.07f, 0.08f, 1f);
+        outline(hud, boxX, boxY, boxW, boxH, s(2),
+                apiKeyEditing ? 0.45f : 1f,
+                apiKeyEditing ? 0.75f : 1f,
+                apiKeyEditing ? 0.95f : 1f,
+                1f);
+        String text = settings.deepSeekApiKey.isEmpty()
+            ? "CLICK TO ENTER KEY"
+            : ("SAVED " + settings.deepSeekApiKey.length() + " CHARS");
+        if (apiKeyEditing) text = settings.deepSeekApiKey.isEmpty() ? "TYPING" : mask(settings.deepSeekApiKey);
+        hud.drawText(text, boxX + s(8), boxY + s(7), valueScale, 1, 1, 1, 0.95f);
+    }
+
+    private static String mask(String value) {
+        int visible = Math.min(4, value.length());
+        int hidden = Math.min(18, Math.max(0, value.length() - visible));
+        return "-".repeat(hidden) + value.substring(value.length() - visible);
     }
 
     private void drawSliderRow(HudRenderer hud, int panelX, int panelW, int rowY,

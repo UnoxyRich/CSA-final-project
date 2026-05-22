@@ -66,6 +66,10 @@ public class Input {
 
     public boolean key(int k) { return curKeys[k]; }
     public boolean keyPressed(int k) { return curKeys[k] && !prevKeys[k]; }
+    public boolean commandOrControlDown() {
+        return key(GLFW_KEY_LEFT_SUPER) || key(GLFW_KEY_RIGHT_SUPER)
+            || key(GLFW_KEY_LEFT_CONTROL) || key(GLFW_KEY_RIGHT_CONTROL);
+    }
     public boolean leftClick() { return curLeft && !prevLeft; }
     public boolean rightClick() { return curRight && !prevRight; }
     public boolean leftDown() { return curLeft; }
@@ -82,5 +86,11 @@ public class Input {
 
     public void clearTypedChars() {
         typedChars.setLength(0);
+    }
+
+    public String clipboardText() {
+        if (window == 0) return "";
+        String text = glfwGetClipboardString(window);
+        return text == null ? "" : text;
     }
 }

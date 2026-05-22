@@ -39,7 +39,11 @@ dependencies {
 
 application {
     mainClass = 'com.csa.minecraft.Main'
-    applicationDefaultJvmArgs = isMac ? ['-XstartOnFirstThread'] : []
+    // -XstartOnFirstThread is required by GLFW on macOS. The rest steadies
+    // frame times: G1 with a low pause target, and a heap large enough up
+    // front that it never resizes (a stop-the-world pause) mid-session.
+    applicationDefaultJvmArgs = (isMac ? ['-XstartOnFirstThread'] : []) +
+        ['-XX:+UseG1GC', '-XX:MaxGCPauseMillis=8', '-Xms1g', '-Xmx2g']
 }
 
 java { toolchain { languageVersion = JavaLanguageVersion.of(17) } }
