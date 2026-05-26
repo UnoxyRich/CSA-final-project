@@ -2,6 +2,7 @@ package com.csa.minecraft;
 
 import com.csa.minecraft.engine.*;
 import com.csa.minecraft.entity.MilkFrog;
+import com.csa.minecraft.entity.MobManager;
 import com.csa.minecraft.player.*;
 import com.csa.minecraft.render.*;
 import com.csa.minecraft.world.*;
@@ -37,6 +38,8 @@ public class Main {
         WorldRenderer worldRenderer = new WorldRenderer(workers);
         WeatherRenderer weatherRenderer = new WeatherRenderer();
         MilkFrogRenderer milkFrogRenderer = new MilkFrogRenderer();
+        MobRenderer mobRenderer = new MobRenderer();
+        MobManager mobs = new MobManager();
         BlockEffectsRenderer blockEffects = new BlockEffectsRenderer();
         HudRenderer hud = new HudRenderer(settings);
         SettingsMenu menu = new SettingsMenu(settings);
@@ -74,6 +77,7 @@ public class Main {
                     Vector3f spawn = prepareSpawn(world);
                     player = new Player(new Vector3f(spawn), settings);
                     milkFrog = MilkFrog.nearPlayer(world, player.position());
+                    mobs.spawnNearPlayer(world, player.position());
                     startScreen.close();
                     worldChangedThisFrame = true;
                     input.grabCursor(true);
@@ -98,6 +102,7 @@ public class Main {
                     Vector3f spawn = prepareSpawn(world);
                     player.respawn(new Vector3f(spawn));
                     milkFrog = MilkFrog.nearPlayer(world, player.position());
+                    mobs.spawnNearPlayer(world, player.position());
                     deathScreen.close();
                     worldChangedThisFrame = true;
                     input.grabCursor(true);
@@ -153,8 +158,13 @@ public class Main {
                 // If user clicks on the world after the menu released the cursor (e.g.
                 // they alt-tabbed and clicked back in), re-grab the cursor.
                 if (!input.cursorGrabbed() && input.leftClick()) input.grabCursor(true);
+                if (input.leftClick() && input.cursorGrabbed()) {
+                    Camera hitCam = player.camera(window.aspect());
+                    mobs.tryHit(hitCam.pos, hitCam.forward, 6f);
+                }
                 player.update(dt, input, world, blockEffects);
                 milkFrog.update(dt, world, player.position());
+                mobs.update(dt, world, player.position());
                 world.update(player.position());
             }
 
@@ -171,6 +181,7 @@ public class Main {
                 worldRenderer.render(world, cam, environment, window.width(), window.height(),
                                      player.isUnderwater(), settings.rayTracingLighting);
                 milkFrogRenderer.render(milkFrog, cam);
+                mobRenderer.render(mobs, cam);
                 weatherRenderer.render(world, cam, environment);
                 blockEffects.render(cam, dt, player.breakingX(), player.breakingY(), player.breakingZ(),
                                     player.breakProgress());
@@ -205,19 +216,19 @@ public class Main {
     }
 
     private static void loadSpawnChunks(World world, Vector3f pos) {
-        // Generation is budgeted per frame, so force the spawn chunk and its
-        // neighbors to exist up front — the player must not spawn into air.
+        // Force a 7x7 chunk area to exist synchronously so the spawn search
+        // has enough land to work with even when the starting column is ocean.
         int spawnCx = (int) Math.floor(pos.x / Chunk.SX);
         int spawnCz = (int) Math.floor(pos.z / Chunk.SZ);
-        for (int dz = -1; dz <= 1; dz++) {
-            for (int dx = -1; dx <= 1; dx++) {
+        for (int dz = -3; dz <= 3; dz++) {
+            for (int dx = -3; dx <= 3; dx++) {
                 world.chunkAt(spawnCx + dx, spawnCz + dz);
             }
         }
     }
 
     private static Vector3f findGroundSpawn(World world, int preferredX, int preferredZ) {
-        for (int radius = 0; radius <= 12; radius++) {
+        for (int radius = 0; radius <= 48; radius++) {
             for (int dz = -radius; dz <= radius; dz++) {
                 for (int dx = -radius; dx <= radius; dx++) {
                     if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
@@ -226,7 +237,15 @@ public class Main {
                 }
             }
         }
-        return new Vector3f(preferredX + 0.5f, TerrainGenerator.SEA_LEVEL + 1f + SPAWN_SKIN,
+        // Last resort: scan the preferred column from the top and place just above
+        // the highest solid block, staying above water rather than inside it.
+        for (int y = Chunk.SY - 3; y >= 0; y--) {
+            Block b = world.getBlock(preferredX, y, preferredZ);
+            if (b != Block.AIR) {
+                return new Vector3f(preferredX + 0.5f, y + 1f + SPAWN_SKIN, preferredZ + 0.5f);
+            }
+        }
+        return new Vector3f(preferredX + 0.5f, TerrainGenerator.SEA_LEVEL + 5f + SPAWN_SKIN,
                             preferredZ + 0.5f);
     }
 

@@ -7,7 +7,8 @@ public enum Block {
     // Biome blocks appended after WATER so existing ordinals (and the
     // hard-coded water=11/glass=8/leaves=5 ids in the world shader) are stable.
     SNOW(true), ICE(true), CACTUS(true), SANDSTONE(true),
-    SPRUCE_WOOD(true), SPRUCE_LEAVES(true), DRY_GRASS(true);
+    SPRUCE_WOOD(true), SPRUCE_LEAVES(true), DRY_GRASS(true),
+    ROCKET(true);
 
     public final boolean solid;
     Block(boolean s) { this.solid = s; }
@@ -38,6 +39,7 @@ public enum Block {
             case SPRUCE_WOOD:   return face <= 1 ? 20 : 19;
             case SPRUCE_LEAVES: return 21;
             case DRY_GRASS:     return face == 0 ? 22 : (face == 1 ? 0 : 23);
+            case ROCKET:        return face == 1 ? 25 : 24; // bottom=exhaust, sides+top=body
             default:     return 3;
         }
     }

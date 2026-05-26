@@ -23,6 +23,17 @@ public class ChunkMesher {
         { 1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0,-1, 0}, {0, 0, 1}, {0, 0,-1},
     };
 
+    // Pyramid normals for ROCKET block side faces: outward + 26.6° upward (atan(0.5)).
+    // Normalized components of (±1, 0.5, 0) and (0, 0.5, ±1).
+    private static final float[][] ROCKET_NORMALS = {
+        { 0.894f, 0.447f,  0.000f},  // f=0: +X sloped up
+        {-0.894f, 0.447f,  0.000f},  // f=1: -X sloped up
+        { 0.000f, 1.000f,  0.000f},  // f=2: +Y (face is skipped for rockets)
+        { 0.000f,-1.000f,  0.000f},  // f=3: -Y bottom, same as cube
+        { 0.000f, 0.447f,  0.894f},  // f=4: +Z sloped up
+        { 0.000f, 0.447f, -0.894f},  // f=5: -Z sloped up
+    };
+
     private static final float[] AO_LEVELS = {0.65f, 0.78f, 0.89f, 1.00f};
 
     // Hoisted constants: these never change, so allocating them per face (as the
@@ -84,6 +95,7 @@ public class ChunkMesher {
                         }
                         if (n.solid && !isTransparent(n) && !isLeaves(n)) continue;
                         if (n == b && isTransparent(b)) continue;
+                        if (b == Block.ROCKET && f == 2) continue; // nose cone: no flat top
 
                         int faceCat = (f == 2) ? 0 : (f == 3 ? 1 : 2);
                         int tile = b.atlasIndex(faceCat);
@@ -102,16 +114,21 @@ public class ChunkMesher {
                         // doesn't break across the diagonal seam. Standard Mojang trick.
                         boolean flip = ao[0] + ao[2] < ao[1] + ao[3];
                         int[] order = flip ? ORDER_FLIP : ORDER_NORMAL;
-                        float[] nrm = FACE_NORMALS[f];
+                        boolean rocketSide = (b == Block.ROCKET && f != 3);
+                        float[] nrm = rocketSide ? ROCKET_NORMALS[f] : FACE_NORMALS[f];
 
                         // A face emits 6 vertices; grow once up front, then write.
                         if (len + 6 * FLOATS_PER_VERTEX > data.length) {
                             data = grow(data, len + 6 * FLOATS_PER_VERTEX);
                         }
                         for (int k : order) {
-                            data[len++] = x + vs[k][0];
-                            data[len++] = y + vertexY(b, c.getMeta(x, y, z), vs[k][1]);
-                            data[len++] = z + vs[k][2];
+                            float vx = vs[k][0], vy = vs[k][1], vz = vs[k][2];
+                            // Rocket side faces taper all top vertices (vy==1) to the
+                            // block centre, forming a pyramid nose-cone shape.
+                            if (rocketSide && vy > 0f) { vx = 0.5f; vz = 0.5f; }
+                            data[len++] = x + vx;
+                            data[len++] = y + vertexY(b, c.getMeta(x, y, z), vy);
+                            data[len++] = z + vz;
                             data[len++] = nrm[0];
                             data[len++] = nrm[1];
                             data[len++] = nrm[2];

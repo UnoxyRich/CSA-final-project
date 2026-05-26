@@ -99,7 +99,9 @@ public class Texture {
         palettes[21] = colors(0x1f4a2a, 0x2a5c34); // spruce leaves
         palettes[22] = colors(0x9aaa4c, 0xb0bd60); // dry grass top (savanna)
         palettes[23] = colors(0x8a7a3c, 0x736030); // dry grass side
-        for (int i = 24; i < palettes.length; i++) palettes[i] = colors(0xff00ff, 0x000000);
+        palettes[24] = colors(0xd8dce8, 0xc0c4d4, 0xe4e8f4, 0xb8bcc8); // rocket body: cool silver
+        palettes[25] = colors(0x1a1a22, 0x242030, 0x0e0e18, 0x2e2840); // rocket exhaust: dark nozzle
+        for (int i = 26; i < palettes.length; i++) palettes[i] = colors(0xff00ff, 0x000000);
 
         Random rng = new Random(7);
         for (int ti = 0; ti < cols * cols; ti++) {
@@ -176,6 +178,10 @@ public class Texture {
             putTile(atlas, size, tile, cols, 21, tint(load(zip, "spruce_leaves", "leaves_spruce"), 0x619961));
             putTile(atlas, size, tile, cols, 22, tint(load(zip, "grass_block_top", "grass_top"), savannaTint));
             putTile(atlas, size, tile, cols, 23, dryGrassSide);
+            // Rocket block has no vanilla texture; fill with solid colors so it's
+            // visible when the HD resource pack is active.
+            fillTile(atlas, size, tile, cols, 24, 0xd0d4e0); // rocket body: silver
+            fillTile(atlas, size, tile, cols, 25, 0x181820); // rocket exhaust: dark nozzle
         }
 
         int id = glGenTextures();
@@ -354,6 +360,17 @@ public class Texture {
 
     private static void free(Image image) {
         if (image.nativeMemory) stbi_image_free(image.rgba);
+    }
+
+    private static void fillTile(ByteBuffer atlas, int atlasPx, int tilePx, int cols, int tile, int rgb) {
+        int tx = tile % cols, ty = tile / cols;
+        byte r = (byte)((rgb >> 16) & 0xff), g = (byte)((rgb >> 8) & 0xff), b = (byte)(rgb & 0xff);
+        for (int y = 0; y < tilePx; y++) {
+            for (int x = 0; x < tilePx; x++) {
+                int idx = ((ty * tilePx + y) * atlasPx + (tx * tilePx + x)) * 4;
+                atlas.put(idx, r); atlas.put(idx + 1, g); atlas.put(idx + 2, b); atlas.put(idx + 3, (byte)0xff);
+            }
+        }
     }
 
     private static int[] colors(int... cs) { return cs; }
