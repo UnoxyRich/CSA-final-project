@@ -178,7 +178,8 @@ function Find-Gradle {
         "${env:ProgramFiles(x86)}\Gradle",
         "$env:LOCALAPPDATA\Microsoft\WinGet\Packages",
         "$env:LOCALAPPDATA\Programs",
-        "$env:LOCALAPPDATA\Gradle"
+        "$env:LOCALAPPDATA\Gradle",
+        "$env:USERPROFILE\.gradle\wrapper\dists"
     ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
 
     foreach ($root in $roots) {
@@ -231,8 +232,36 @@ $javaVersion = Get-JavaVersionLine (Join-Path $env:JAVA_HOME "bin\java.exe")
 Write-Host "-> JAVA_HOME: $env:JAVA_HOME"
 Write-Host "-> Java:      $javaVersion"
 Write-Host "-> Gradle:    $gradleCommand"
-Write-Host "-> Launching Minecraft (Ctrl-C to quit) ..."
+Write-Host "-> Building Minecraft app distribution ..."
 Write-Host ""
 
-& $gradleCommand --console=plain run @GradleArgs
-exit $LASTEXITCODE
+$previousDebug = $env:DEBUG
+try {
+    Remove-Item Env:DEBUG -ErrorAction SilentlyContinue
+    & $gradleCommand --console=plain installDist @GradleArgs
+    $buildExit = $LASTEXITCODE
+    if ($buildExit -ne 0) {
+        exit $buildExit
+    }
+
+    if ($GradleArgs -contains "--dry-run") {
+        exit 0
+    }
+
+    $appBat = Join-Path $PSScriptRoot "build\install\minecraft\bin\minecraft.bat"
+    if (-not (Test-Path -LiteralPath $appBat)) {
+        throw "Built app launcher not found: $appBat"
+    }
+
+    Write-Host ""
+    Write-Host "-> Launching built Minecraft (Ctrl-C to quit) ..."
+    Write-Host "-> App:       $appBat"
+    Write-Host ""
+
+    & $appBat
+    exit $LASTEXITCODE
+} finally {
+    if ($null -ne $previousDebug) {
+        $env:DEBUG = $previousDebug
+    }
+}

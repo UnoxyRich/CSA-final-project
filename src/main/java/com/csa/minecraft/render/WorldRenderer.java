@@ -53,8 +53,8 @@ public class WorldRenderer {
     private final ChunkWorkerPool workers;
     private static final int MESH_DISPATCH_MAX = 12;
     private static final long MESH_UPLOAD_BUDGET_NS = 3_000_000L;
-    /** A chunk's vertex array, built off-thread, waiting for a GL upload here. */
-    private record MeshResult(Chunk chunk, float[] data) {}
+    /** A chunk's vertex arrays, built off-thread, waiting for a GL upload here. */
+    private record MeshResult(Chunk chunk, float[] opaque, float[] transparent) {}
     private final ConcurrentLinkedQueue<MeshResult> meshResults = new ConcurrentLinkedQueue<>();
 
     private static final String VERT = """
@@ -628,26 +628,27 @@ public class WorldRenderer {
         shader.setInt("uRenderPass", 0);
         glDisable(GL_BLEND);
         glDepthMask(true);
-        drawChunks(world, model);
+        drawChunks(world, model, false);
 
         shader.setInt("uRenderPass", 1);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDepthMask(false);
-        drawChunks(world, model);
+        drawChunks(world, model, true);
         glDepthMask(true);
         glDisable(GL_BLEND);
     }
 
-    private void drawChunks(World world, Matrix4f model) {
+    private void drawChunks(World world, Matrix4f model, boolean transparentPass) {
         for (Chunk c : world.loaded()) {
-            if (c.mesh == null || c.mesh.vertexCount() == 0) continue;
+            Mesh mesh = transparentPass ? c.transparentMesh : c.mesh;
+            if (mesh == null || mesh.vertexCount() == 0) continue;
             float minX = c.cx * Chunk.SX, minZ = c.cz * Chunk.SZ;
             if (!frustum.testAab(minX, 0f, minZ,
                                  minX + Chunk.SX, Chunk.SY, minZ + Chunk.SZ)) continue;
             model.identity().translate(c.cx * Chunk.SX, 0, c.cz * Chunk.SZ);
             shader.setMat4("uModel", model);
-            c.mesh.draw();
+            mesh.draw();
         }
     }
 
@@ -664,10 +665,10 @@ public class WorldRenderer {
             Chunk c = result.chunk();
             c.meshing = false;
             if (c.unloaded) continue; // chunk was unloaded while its job ran
-            if (c.mesh == null) c.mesh = new Mesh();
             // glBufferData orphans the old store, so reusing the Mesh avoids
             // churning GL buffer/VAO objects (a driver-side stall) every build.
-            c.mesh.upload(result.data(), ChunkMesher.LAYOUT);
+            c.mesh = uploadOrDestroy(c.mesh, result.opaque());
+            c.transparentMesh = uploadOrDestroy(c.transparentMesh, result.transparent());
             if (System.nanoTime() - uploadStart >= MESH_UPLOAD_BUDGET_NS) break;
         }
 
@@ -703,8 +704,26 @@ public class WorldRenderer {
             Chunk c = nearest[i];
             c.dirty = false;
             c.meshing = true;
-            workers.submit(() -> meshResults.add(new MeshResult(c, ChunkMesher.buildMesh(c, world))));
+            workers.submit(() -> {
+                ChunkMesher.MeshData md = ChunkMesher.buildMesh(c, world);
+                meshResults.add(new MeshResult(c, md.opaque(), md.transparent()));
+            });
         }
+    }
+
+    /**
+     * Uploads vertex data into the given Mesh on the GL thread, creating one if
+     * needed; an empty array means the chunk has no geometry of this kind, so we
+     * destroy any existing Mesh and return null. Main thread only.
+     */
+    private static Mesh uploadOrDestroy(Mesh mesh, float[] data) {
+        if (data.length == 0) {
+            if (mesh != null) mesh.destroy();
+            return null;
+        }
+        if (mesh == null) mesh = new Mesh();
+        mesh.upload(data, ChunkMesher.LAYOUT);
+        return mesh;
     }
 
     public void render(World world, Camera cam, Environment env, int width, int height) {

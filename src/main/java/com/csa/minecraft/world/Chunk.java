@@ -11,6 +11,9 @@ public class Chunk {
     // for every other block. Chunk.set() clears it.
     private final byte[] meta = new byte[SX * SY * SZ];
     public Mesh mesh;
+    // Glass/water faces are built into a second mesh so they can be drawn in a
+    // separate alpha-blended pass after all opaque geometry.
+    public Mesh transparentMesh;
     // dirty/unloaded cross the worker/main boundary, so they are volatile:
     // a generation worker fills a chunk and an integrated chunk may be unloaded
     // while a mesh job for it is still in flight.

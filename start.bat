@@ -3,7 +3,7 @@ setlocal
 
 cd /d "%~dp0"
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-windows.ps1" %*
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-windows.ps1" %*
 set "LAUNCH_EXIT=%ERRORLEVEL%"
 
 if not "%LAUNCH_EXIT%"=="0" (

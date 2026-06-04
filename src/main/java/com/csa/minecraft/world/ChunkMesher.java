@@ -3,8 +3,15 @@ package com.csa.minecraft.world;
 import java.util.Arrays;
 
 public class ChunkMesher {
-    /** Vertex attribute layout of the array buildMesh() returns: pos3, nrm3, uv2, ao1, id1. */
+    /** Vertex attribute layout of the arrays buildMesh() returns: pos3, nrm3, uv2, ao1, id1. */
     public static final int[] LAYOUT = {3, 3, 2, 1, 1};
+
+    /**
+     * The two vertex arrays a build produces: opaque geometry and the
+     * separately-blended transparent geometry (glass/water). Both use
+     * {@link #LAYOUT}. The caller uploads them to GL on the main thread.
+     */
+    public record MeshData(float[] opaque, float[] transparent) {}
 
     // face order: +X, -X, +Y(top), -Y(bottom), +Z, -Z
     private static final int[][] OFFSETS = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
@@ -37,7 +44,7 @@ public class ChunkMesher {
     private static final float[] AO_LEVELS = {0.65f, 0.78f, 0.89f, 1.00f};
 
     // Hoisted constants: these never change, so allocating them per face (as the
-    // old code did, ~44k times per chunk) was pure garbage. See rebuild().
+    // old code did, ~44k times per chunk) was pure garbage. See buildMesh().
     private static final float[][] FACE_UVS = {{0,0},{0,1},{1,1},{1,0}};
     private static final int[] ORDER_NORMAL = {0, 1, 2, 0, 2, 3};
     private static final int[] ORDER_FLIP   = {1, 2, 3, 1, 3, 0};
@@ -63,18 +70,20 @@ public class ChunkMesher {
     }
 
     /**
-     * Builds the interleaved vertex array for a chunk and returns it. This is
+     * Builds the interleaved vertex arrays for a chunk and returns them. This is
      * pure CPU work — it only reads block data — so it runs on a worker thread.
-     * The caller uploads the result to a GL buffer on the main thread (see
-     * {@link #LAYOUT}); GL objects must never be touched off the GL thread.
+     * Glass/water faces go to {@link MeshData#transparent()} for the blended
+     * pass, everything else to {@link MeshData#opaque()}. The caller uploads the
+     * result to GL buffers on the main thread (see {@link #LAYOUT}); GL objects
+     * must never be touched off the GL thread.
      */
-    public static float[] buildMesh(Chunk c, World world) {
+    public static MeshData buildMesh(Chunk c, World world) {
         // Write vertices straight into a growable float[]: no Float boxing, no
         // per-face/per-vertex allocations. The only garbage a build produces
-        // now is this array (and its final trim), which keeps GC pauses, the
+        // now is these arrays (and their final trim), which keeps GC pauses, the
         // main cause of frame-time spikes, to a minimum.
-        float[] data = new float[4096];
-        int len = 0;
+        FloatBuilder opaque = new FloatBuilder(4096);
+        FloatBuilder transparent = new FloatBuilder(1024);
         int atlasSize = 8; // must match Texture (8x8 = 64 tiles)
         float uStep = 1f / atlasSize;
         float[] ao = new float[4]; // reused for every face
@@ -118,36 +127,29 @@ public class ChunkMesher {
                         float[] nrm = rocketSide ? ROCKET_NORMALS[f] : FACE_NORMALS[f];
 
                         // A face emits 6 vertices; grow once up front, then write.
-                        if (len + 6 * FLOATS_PER_VERTEX > data.length) {
-                            data = grow(data, len + 6 * FLOATS_PER_VERTEX);
-                        }
+                        FloatBuilder out = isTransparent(b) ? transparent : opaque;
+                        out.ensure(6 * FLOATS_PER_VERTEX);
                         for (int k : order) {
                             float vx = vs[k][0], vy = vs[k][1], vz = vs[k][2];
                             // Rocket side faces taper all top vertices (vy==1) to the
                             // block centre, forming a pyramid nose-cone shape.
                             if (rocketSide && vy > 0f) { vx = 0.5f; vz = 0.5f; }
-                            data[len++] = x + vx;
-                            data[len++] = y + vertexY(b, c.getMeta(x, y, z), vy);
-                            data[len++] = z + vz;
-                            data[len++] = nrm[0];
-                            data[len++] = nrm[1];
-                            data[len++] = nrm[2];
-                            data[len++] = u0 + FACE_UVS[k][0] * uStep;
-                            data[len++] = v0 + FACE_UVS[k][1] * uStep;
-                            data[len++] = ao[k];
-                            data[len++] = b.ordinal();
+                            out.add(x + vx);
+                            out.add(y + vertexY(b, c.getMeta(x, y, z), vy));
+                            out.add(z + vz);
+                            out.add(nrm[0]);
+                            out.add(nrm[1]);
+                            out.add(nrm[2]);
+                            out.add(u0 + FACE_UVS[k][0] * uStep);
+                            out.add(v0 + FACE_UVS[k][1] * uStep);
+                            out.add(ao[k]);
+                            out.add(b.ordinal());
                         }
                     }
                 }
             }
         }
-        return (len == data.length) ? data : Arrays.copyOf(data, len);
-    }
-
-    private static float[] grow(float[] a, int min) {
-        int n = a.length * 2;
-        while (n < min) n *= 2;
-        return Arrays.copyOf(a, n);
+        return new MeshData(opaque.toArray(), transparent.toArray());
     }
 
     private static float vertexY(Block b, int meta, float vy) {
@@ -198,5 +200,31 @@ public class ChunkMesher {
         if (axisA == 0) dx += signA; else if (axisA == 1) dy += signA; else if (axisA == 2) dz += signA;
         if (axisB == 0) dx += signB; else if (axisB == 1) dy += signB; else if (axisB == 2) dz += signB;
         return world.getBlock(wx + dx, y + dy, wz + dz);
+    }
+
+    /** Growable float array — avoids Float boxing and per-face reallocation. */
+    private static class FloatBuilder {
+        private float[] data;
+        private int len;
+
+        FloatBuilder(int initialCapacity) {
+            data = new float[initialCapacity];
+        }
+
+        void ensure(int extra) {
+            int min = len + extra;
+            if (min <= data.length) return;
+            int n = data.length * 2;
+            while (n < min) n *= 2;
+            data = Arrays.copyOf(data, n);
+        }
+
+        void add(float value) {
+            data[len++] = value;
+        }
+
+        float[] toArray() {
+            return len == data.length ? data : Arrays.copyOf(data, len);
+        }
     }
 }

@@ -136,6 +136,7 @@ public class World {
             if (Math.abs(c.cx - pcx) > unloadR || Math.abs(c.cz - pcz) > unloadR) {
                 c.unloaded = true; // a mesh job for it may still be in flight
                 if (c.mesh != null) c.mesh.destroy();
+                if (c.transparentMesh != null) c.transparentMesh.destroy();
                 return true;
             }
             return false;

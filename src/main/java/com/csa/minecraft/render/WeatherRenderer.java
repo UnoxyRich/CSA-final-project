@@ -10,6 +10,7 @@ import com.csa.minecraft.world.World;
 import org.joml.Vector3f;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 
@@ -20,6 +21,8 @@ public class WeatherRenderer {
     private final Mesh mesh;
     private final List<Drop> drops = new ArrayList<>();
     private final Random rng = new Random(8192);
+    private float[] vertexData = new float[48_000];
+    private int vertexLen = 0;
 
     private static final String VERT = """
         #version 330 core
@@ -65,11 +68,11 @@ public class WeatherRenderer {
             return;
         }
 
-        List<Float> data = new ArrayList<>(9000);
-        buildRain(world, cam, rain, data);
-        if (data.isEmpty()) return;
+        vertexLen = 0;
+        buildRain(world, cam, rain);
+        if (vertexLen == 0) return;
 
-        mesh.upload(toArray(data), new int[]{3, 1});
+        mesh.upload(Arrays.copyOf(vertexData, vertexLen), new int[]{3, 1});
 
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -92,7 +95,7 @@ public class WeatherRenderer {
         glDisable(GL_BLEND);
     }
 
-    private void buildRain(World world, Camera cam, float rain, List<Float> data) {
+    private void buildRain(World world, Camera cam, float rain) {
         long nowNanos = System.nanoTime();
         float dt = frameDt(nowNanos);
         int targetDrops = (int) (420 + 360 * rain);
@@ -125,10 +128,13 @@ public class WeatherRenderer {
 
             float edgeFade = 1.0f - (float) Math.sqrt(dist2) / radius;
             float alpha = rain * (0.10f + 0.32f * edgeFade) * drop.alpha;
-            Vector3f top = new Vector3f(drop.x, drop.y, drop.z);
-            Vector3f bottom = new Vector3f(drop.x - windX, drop.y - length * drop.lenScale, drop.z - windZ);
-            addStreak(data, top, bottom, width * drop.widthScale, 0f, 1f, alpha);
-            addStreak(data, top, bottom, width * drop.widthScale, 1f, 0f, alpha * 0.55f);
+            float bottomX = drop.x - windX;
+            float bottomY = drop.y - length * drop.lenScale;
+            float bottomZ = drop.z - windZ;
+            addStreak(drop.x, drop.y, drop.z, bottomX, bottomY, bottomZ,
+                      width * drop.widthScale, 0f, 1f, alpha);
+            addStreak(drop.x, drop.y, drop.z, bottomX, bottomY, bottomZ,
+                      width * drop.widthScale, 1f, 0f, alpha * 0.55f);
         }
     }
 
@@ -140,29 +146,33 @@ public class WeatherRenderer {
         return true;
     }
 
-    private void addStreak(List<Float> data, Vector3f top, Vector3f bottom,
+    private void addStreak(float topX, float topY, float topZ,
+                           float bottomX, float bottomY, float bottomZ,
                            float width, float ox, float oz, float alpha) {
         float hx = ox * width;
         float hz = oz * width;
-        addVertex(data, top.x - hx, top.y, top.z - hz, alpha * 0.10f);
-        addVertex(data, bottom.x - hx, bottom.y, bottom.z - hz, alpha);
-        addVertex(data, bottom.x + hx, bottom.y, bottom.z + hz, alpha);
-        addVertex(data, top.x - hx, top.y, top.z - hz, alpha * 0.10f);
-        addVertex(data, bottom.x + hx, bottom.y, bottom.z + hz, alpha);
-        addVertex(data, top.x + hx, top.y, top.z + hz, alpha * 0.10f);
+        addVertex(topX - hx, topY, topZ - hz, alpha * 0.10f);
+        addVertex(bottomX - hx, bottomY, bottomZ - hz, alpha);
+        addVertex(bottomX + hx, bottomY, bottomZ + hz, alpha);
+        addVertex(topX - hx, topY, topZ - hz, alpha * 0.10f);
+        addVertex(bottomX + hx, bottomY, bottomZ + hz, alpha);
+        addVertex(topX + hx, topY, topZ + hz, alpha * 0.10f);
     }
 
-    private void addVertex(List<Float> data, float x, float y, float z, float alpha) {
-        data.add(x);
-        data.add(y);
-        data.add(z);
-        data.add(alpha);
+    private void addVertex(float x, float y, float z, float alpha) {
+        ensureVertexCapacity(4);
+        vertexData[vertexLen++] = x;
+        vertexData[vertexLen++] = y;
+        vertexData[vertexLen++] = z;
+        vertexData[vertexLen++] = alpha;
     }
 
-    private float[] toArray(List<Float> data) {
-        float[] out = new float[data.size()];
-        for (int i = 0; i < out.length; i++) out[i] = data.get(i);
-        return out;
+    private void ensureVertexCapacity(int extra) {
+        int min = vertexLen + extra;
+        if (min <= vertexData.length) return;
+        int n = vertexData.length * 2;
+        while (n < min) n *= 2;
+        vertexData = Arrays.copyOf(vertexData, n);
     }
 
     private float lastFrameSeconds = -1f;
