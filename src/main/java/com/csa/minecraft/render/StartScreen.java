@@ -61,7 +61,7 @@ public class StartScreen {
         hud.rectPx(panelX, panelY, panelW, panelH, 0.10f, 0.12f, 0.13f, 0.96f);
         outline(hud, panelX, panelY, panelW, panelH, s(2), 0.95f, 0.95f, 0.95f, 0.95f);
 
-        drawCentered(hud, "CSA MINECRAFT", panelX, panelW, panelY + s(28), titleScale,
+        drawCentered(hud, "NAILONGCRAFT", panelX, panelW, panelY + s(28), titleScale,
                      0.95f, 0.95f, 0.95f, 1f);
         drawCentered(hud, "CREATE A WORLD", panelX, panelW, panelY + s(92), textScale,
                      0.72f, 0.88f, 1f, 0.95f);

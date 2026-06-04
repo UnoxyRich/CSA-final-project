@@ -10,48 +10,72 @@ import java.util.Random;
 import java.util.function.Consumer;
 
 public class MobManager {
-    private static final int PIG_COUNT    = 5;
-    private static final int COW_COUNT    = 4;
-    private static final int PIGMAN_COUNT = 3;
+    // Max total mobs alive at once
+    private static final int MAX_PIGS   = 15;
+    private static final int MAX_COWS   = 10;
+    private static final int MAX_PIGMEN =  8;
+
+    // Radius used for the initial spawn at game start (close to player)
+    private static final int INIT_MIN_R =  6;
+    private static final int INIT_MAX_R = 20;
+
+    // Radius used for ongoing random spawning while exploring
+    private static final int ROAM_MIN_R = 24;
+    private static final int ROAM_MAX_R = 64;
+
+    // Mobs beyond this horizontal distance from the player are despawned
+    private static final float DESPAWN_R = 90f;
+
+    // Seconds between each periodic spawn attempt
+    private static final float SPAWN_INTERVAL = 5f;
 
     private final List<Pig>          pigs   = new ArrayList<>();
     private final List<Cow>          cows   = new ArrayList<>();
     private final List<ZombiePigman> pigmen = new ArrayList<>();
+    private final Random             rng    = new Random();
+    private float spawnTimer = 0f;
 
     public List<Pig>          pigs()   { return pigs; }
     public List<Cow>          cows()   { return cows; }
     public List<ZombiePigman> pigmen() { return pigmen; }
 
+    /** Called once at world start to seed mobs close to the player. */
     public void spawnNearPlayer(World world, Vector3f playerPos) {
-        pigs.clear();
-        cows.clear();
-        pigmen.clear();
-        Random rng = new Random();
+        pigs.clear(); cows.clear(); pigmen.clear();
         int px = (int) Math.floor(playerPos.x);
         int pz = (int) Math.floor(playerPos.z);
-        spawnGroup(world, playerPos, rng, px, pz, PIG_COUNT,     6, 14, s -> pigs.add(new Pig(s)));
-        spawnGroup(world, playerPos, rng, px, pz, COW_COUNT,     7, 15, s -> cows.add(new Cow(s)));
-        spawnGroup(world, playerPos, rng, px, pz, PIGMAN_COUNT, 10, 20, s -> pigmen.add(new ZombiePigman(s)));
+        spawnGroup(world, rng, px, pz, 5, INIT_MIN_R, INIT_MAX_R, s -> pigs.add(new Pig(s)));
+        spawnGroup(world, rng, px, pz, 4, INIT_MIN_R, INIT_MAX_R, s -> cows.add(new Cow(s)));
+        spawnGroup(world, rng, px, pz, 3, INIT_MIN_R, INIT_MAX_R, s -> pigmen.add(new ZombiePigman(s)));
     }
 
-    private static void spawnGroup(World world, Vector3f playerPos, Random rng,
-                                   int px, int pz, int count, int minR, int maxR,
-                                   Consumer<Vector3f> adder) {
-        for (int i = 0; i < count; i++) {
-            Vector3f spawn = null;
-            for (int attempt = 0; attempt < 30 && spawn == null; attempt++) {
-                int r = minR + rng.nextInt(maxR - minR + 1);
-                double angle = rng.nextDouble() * Math.PI * 2;
-                int ox = (int) Math.round(Math.cos(angle) * r);
-                int oz = (int) Math.round(Math.sin(angle) * r);
-                spawn = Mob.spawnAtColumn(world, px + ox, pz + oz);
-            }
-            if (spawn == null) continue; // no dry land found — skip rather than spawn in water
-            adder.accept(spawn);
+    /** Try to place one mob at a random position in [minR, maxR] from (px,pz). */
+    private static void spawnOne(World world, Random rng, int px, int pz,
+                                 int minR, int maxR, Consumer<Vector3f> adder) {
+        for (int attempt = 0; attempt < 20; attempt++) {
+            int r = minR + rng.nextInt(maxR - minR + 1);
+            double angle = rng.nextDouble() * Math.PI * 2;
+            int ox = (int) Math.round(Math.cos(angle) * r);
+            int oz = (int) Math.round(Math.sin(angle) * r);
+            Vector3f spawn = Mob.spawnAtColumn(world, px + ox, pz + oz);
+            if (spawn != null) { adder.accept(spawn); return; }
         }
     }
 
+    private static void spawnGroup(World world, Random rng,
+                                   int px, int pz, int count, int minR, int maxR,
+                                   Consumer<Vector3f> adder) {
+        for (int i = 0; i < count; i++)
+            spawnOne(world, rng, px, pz, minR, maxR, adder);
+    }
+
+    private static float distSq2D(Vector3f a, Vector3f b) {
+        float dx = a.x - b.x, dz = a.z - b.z;
+        return dx * dx + dz * dz;
+    }
+
     public void update(float dt, World world, Vector3f playerPos, Player player) {
+        // Mob AI
         for (Pig p          : pigs)   p.update(dt, world, playerPos);
         for (Cow c          : cows)   c.update(dt, world, playerPos);
         for (ZombiePigman z : pigmen) {
@@ -59,9 +83,28 @@ public class MobManager {
             float dmg = z.tryAttack(playerPos);
             if (dmg > 0f) player.takeDamage(dmg);
         }
+        // Remove dead mobs
         pigs.removeIf(p -> !p.isAlive());
         cows.removeIf(c -> !c.isAlive());
         pigmen.removeIf(z -> !z.isAlive());
+        // Despawn mobs that wandered too far from the player
+        float dr2 = DESPAWN_R * DESPAWN_R;
+        pigs.removeIf(p -> distSq2D(p.position(), playerPos) > dr2);
+        cows.removeIf(c -> distSq2D(c.position(), playerPos) > dr2);
+        pigmen.removeIf(z -> distSq2D(z.position(), playerPos) > dr2);
+        // Periodic random spawning across the world as the player explores
+        spawnTimer += dt;
+        if (spawnTimer >= SPAWN_INTERVAL) {
+            spawnTimer = 0f;
+            int px = (int) Math.floor(playerPos.x);
+            int pz = (int) Math.floor(playerPos.z);
+            if (pigs.size()   < MAX_PIGS)
+                spawnOne(world, rng, px, pz, ROAM_MIN_R, ROAM_MAX_R, s -> pigs.add(new Pig(s)));
+            if (cows.size()   < MAX_COWS)
+                spawnOne(world, rng, px, pz, ROAM_MIN_R, ROAM_MAX_R, s -> cows.add(new Cow(s)));
+            if (pigmen.size() < MAX_PIGMEN)
+                spawnOne(world, rng, px, pz, ROAM_MIN_R, ROAM_MAX_R, s -> pigmen.add(new ZombiePigman(s)));
+        }
     }
 
     // Returns true if a mob within reach was hit. The nearest mob along the ray is damaged.

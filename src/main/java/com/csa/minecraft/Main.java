@@ -21,7 +21,7 @@ public class Main {
     private static final float SPAWN_SKIN = 0.01f;
 
     public static void main(String[] args) {
-        Window window = new Window("Minecraft (CSA)", 1280, 720);
+        Window window = new Window("NailongCraft", 1280, 720);
         window.init();
         Input input = new Input(window.handle());
 
@@ -217,7 +217,7 @@ public class Main {
             window.swap();
             frames++; fpsTimer += dt;
             if (fpsTimer >= 1.0) {
-                window.setTitle("Minecraft (CSA) - " + frames + " fps");
+                window.setTitle("NailongCraft - " + frames + " fps");
                 frames = 0; fpsTimer = 0;
             }
         }
