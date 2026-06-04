@@ -8,10 +8,18 @@ public enum Block {
     // hard-coded water=11/glass=8/leaves=5 ids in the world shader) are stable.
     SNOW(true), ICE(true), CACTUS(true), SANDSTONE(true),
     SPRUCE_WOOD(true), SPRUCE_LEAVES(true), DRY_GRASS(true),
-    ROCKET(true);
+    ROCKET(true),
+    // Non-placeable crafting items (solid=false, isItem()=true)
+    STICK(false), SWORD(false), PICKAXE(false), AXE(false), SHOVEL(false);
 
     public final boolean solid;
     Block(boolean s) { this.solid = s; }
+
+    /** True for items that exist only as inventory/crafting ingredients and cannot be placed. */
+    public boolean isItem() {
+        return this == STICK || this == SWORD || this == PICKAXE
+            || this == AXE   || this == SHOVEL;
+    }
 
     public static Block byId(int id) {
         Block[] vs = values();
@@ -39,7 +47,12 @@ public enum Block {
             case SPRUCE_WOOD:   return face <= 1 ? 20 : 19;
             case SPRUCE_LEAVES: return 21;
             case DRY_GRASS:     return face == 0 ? 22 : (face == 1 ? 0 : 23);
-            case ROCKET:        return face == 1 ? 25 : 24; // bottom=exhaust, sides+top=body
+            case ROCKET:        return face == 1 ? 25 : 24;
+            case STICK:    return 26;
+            case SWORD:    return 27;
+            case PICKAXE:  return 28;
+            case AXE:      return 29;
+            case SHOVEL:   return 30;
             default:     return 3;
         }
     }

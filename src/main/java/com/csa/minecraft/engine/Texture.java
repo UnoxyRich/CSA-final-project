@@ -101,7 +101,12 @@ public class Texture {
         palettes[23] = colors(0x8a7a3c, 0x736030); // dry grass side
         palettes[24] = colors(0xd8dce8, 0xc0c4d4, 0xe4e8f4, 0xb8bcc8); // rocket body: cool silver
         palettes[25] = colors(0x1a1a22, 0x242030, 0x0e0e18, 0x2e2840); // rocket exhaust: dark nozzle
-        for (int i = 26; i < palettes.length; i++) palettes[i] = colors(0xff00ff, 0x000000);
+        palettes[26] = colors(0x8b5a2b, 0xa06030, 0x7a4c22); // stick: brown wood
+        palettes[27] = colors(0xb0b8c0, 0xc8d0d8, 0x8a7868); // sword: steel blade
+        palettes[28] = colors(0x888888, 0x9a9a9a, 0x7a5030); // pickaxe: stone + handle
+        palettes[29] = colors(0x888888, 0x9a9a9a, 0x7a5030); // axe: stone + handle
+        palettes[30] = colors(0x909090, 0xa0a0a0, 0x7a5030); // shovel: gray + handle
+        for (int i = 31; i < palettes.length; i++) palettes[i] = colors(0xff00ff, 0x000000);
 
         Random rng = new Random(7);
         for (int ti = 0; ti < cols * cols; ti++) {
@@ -122,6 +127,9 @@ public class Texture {
                 }
             }
         }
+
+        // Draw pixel-art item icons over tiles 26-30 (transparent background)
+        drawItemIcons(buf, size, cols, tile);
 
         int id = glGenTextures();
         glBindTexture(GL_TEXTURE_2D, id);
@@ -182,7 +190,15 @@ public class Texture {
             // visible when the HD resource pack is active.
             fillTile(atlas, size, tile, cols, 24, 0xd0d4e0); // rocket body: silver
             fillTile(atlas, size, tile, cols, 25, 0x181820); // rocket exhaust: dark nozzle
+            // Item tiles (no vanilla texture) - base fill, overwritten below
+            fillTile(atlas, size, tile, cols, 26, 0x8b5a2b);
+            fillTile(atlas, size, tile, cols, 27, 0xb8c0c8);
+            fillTile(atlas, size, tile, cols, 28, 0x909090);
+            fillTile(atlas, size, tile, cols, 29, 0x909090);
+            fillTile(atlas, size, tile, cols, 30, 0x909090);
         }
+        // Pixel-art item icons (works for any tile size via scale factor)
+        drawItemIcons(atlas, size, cols, tile);
 
         int id = glGenTextures();
         glBindTexture(GL_TEXTURE_2D, id);
@@ -377,6 +393,139 @@ public class Texture {
     private static int darken(int c, float f) {
         int r = (int)(((c>>16)&0xff)*f), g = (int)(((c>>8)&0xff)*f), b = (int)((c&0xff)*f);
         return (r<<16)|(g<<8)|b;
+    }
+
+    // Item pixel art (tiles 26-30)
+    // Icons use a 16x16 logical grid (lx,ly), y=0=TOP.
+    // blk() scales each logical pixel to S x S atlas pixels (S=tilePx/16).
+    // Buffer row 0 = bottom of OpenGL texture = bottom of slot on screen.
+    // Y-flip: bufY = tilePx - 1 - ly*S - dy.
+
+    private static void drawItemIcons(ByteBuffer buf, int atlasPx, int cols, int tilePx) {
+        for (int t = 26; t <= 30; t++) {
+            int tx = t % cols, ty = t / cols;
+            for (int y = 0; y < tilePx; y++)
+                for (int x = 0; x < tilePx; x++) {
+                    int idx = ((ty * tilePx + y) * atlasPx + tx * tilePx + x) * 4;
+                    buf.put(idx, (byte)0); buf.put(idx+1, (byte)0);
+                    buf.put(idx+2, (byte)0); buf.put(idx+3, (byte)0);
+                }
+        }
+        int S = Math.max(1, tilePx / 16);
+
+        final int BD = 0x3C2010, BM = 0x7B4A28, BL = 0xC8904C; // wood
+        final int SD = 0x5060A0, SM = 0x8CACCC, SL = 0xD0EEFF; // silver blade
+        final int GD = 0x383838, GM = 0x787878, GL = 0xC8C8C8; // stone
+
+        // STICK (26): thick diagonal \ from top-left to bottom-right
+        for (int i = 0; i < 13; i++) {
+            blk(buf, atlasPx, cols, tilePx, S, 26, 1+i, 1+i, BL);
+            blk(buf, atlasPx, cols, tilePx, S, 26, 2+i, 1+i, BM);
+            blk(buf, atlasPx, cols, tilePx, S, 26, 3+i, 1+i, BD);
+        }
+
+        // SWORD (27): vertical blade + wide horizontal crossguard + grip + pommel
+        // Blade: 3-wide vertical column (x=6-8, y=0-9), tip narrows to 1 at y=0
+        blk(buf, atlasPx, cols, tilePx, S, 27, 7, 0, SL); // single-pixel tip
+        for (int y = 1; y <= 9; y++) {
+            blk(buf, atlasPx, cols, tilePx, S, 27, 6, y, SL);
+            blk(buf, atlasPx, cols, tilePx, S, 27, 7, y, SM);
+            blk(buf, atlasPx, cols, tilePx, S, 27, 8, y, SD);
+        }
+        // Crossguard: horizontal bar (x=2-13, y=10-11, brown)
+        for (int x = 2; x <= 13; x++) {
+            blk(buf, atlasPx, cols, tilePx, S, 27, x, 10, BL);
+            blk(buf, atlasPx, cols, tilePx, S, 27, x, 11, BM);
+        }
+        // Grip: narrow vertical (x=7-8, y=12-13)
+        for (int y = 12; y <= 13; y++) {
+            blk(buf, atlasPx, cols, tilePx, S, 27, 7, y, BM);
+            blk(buf, atlasPx, cols, tilePx, S, 27, 8, y, BD);
+        }
+        // Pommel: wide knob (x=5-10, y=14-15)
+        for (int x = 5; x <= 10; x++) {
+            blk(buf, atlasPx, cols, tilePx, S, 27, x, 14, BM);
+            blk(buf, atlasPx, cols, tilePx, S, 27, x, 15, BD);
+        }
+
+        // PICKAXE (28): T-shape head (full-width bar + two prongs) + diagonal handle
+        for (int x = 0; x <= 15; x++) { // full-width horizontal bar
+            blk(buf, atlasPx, cols, tilePx, S, 28, x, 3, GL);
+            blk(buf, atlasPx, cols, tilePx, S, 28, x, 4, GM);
+            blk(buf, atlasPx, cols, tilePx, S, 28, x, 5, GD);
+        }
+        // Left prong (curves up from left end)
+        for (int y = 0; y <= 2; y++) {
+            blk(buf, atlasPx, cols, tilePx, S, 28, 0, y, GL);
+            blk(buf, atlasPx, cols, tilePx, S, 28, 1, y, GM);
+            blk(buf, atlasPx, cols, tilePx, S, 28, 2, y, GD);
+        }
+        // Right prong (curves up from right end)
+        for (int y = 0; y <= 2; y++) {
+            blk(buf, atlasPx, cols, tilePx, S, 28, 13, y, GL);
+            blk(buf, atlasPx, cols, tilePx, S, 28, 14, y, GM);
+            blk(buf, atlasPx, cols, tilePx, S, 28, 15, y, GD);
+        }
+        // Handle: straight vertical (x=7-8, y=6-15) so shape is a clear T
+        for (int y = 6; y <= 15; y++) {
+            blk(buf, atlasPx, cols, tilePx, S, 28, 7, y, BM);
+            blk(buf, atlasPx, cols, tilePx, S, 28, 8, y, BD);
+        }
+
+        // AXE (29): large rectangular head on left side + diagonal handle
+        for (int y = 0; y <= 10; y++) {
+            for (int x = 0; x <= 7; x++) {
+                int c = (x == 0) ? GL          // blade highlight edge
+                      : (x == 7 || y == 0 || y == 10) ? GD // border
+                      : (x == 1) ? GL           // secondary highlight
+                      : GM;                      // body
+                blk(buf, atlasPx, cols, tilePx, S, 29, x, y, c);
+            }
+        }
+        // Handle from right edge of head down-right
+        for (int i = 0; i < 8; i++) {
+            blk(buf, atlasPx, cols, tilePx, S, 29, 7+i, 4+i, BM);
+            blk(buf, atlasPx, cols, tilePx, S, 29, 8+i, 4+i, BD);
+        }
+
+        // SHOVEL (30): wide rectangular blade + vertical handle + pommel knob
+        for (int y = 0; y <= 3; y++) {
+            for (int x = 3; x <= 12; x++) {
+                int c = (y == 0 || y == 3 || x == 3 || x == 12) ? GD
+                      : (x == 4) ? GL
+                      : GM;
+                blk(buf, atlasPx, cols, tilePx, S, 30, x, y, c);
+            }
+        }
+        // Handle: near-vertical x=7-8
+        for (int y = 4; y <= 12; y++) {
+            blk(buf, atlasPx, cols, tilePx, S, 30, 7, y, BM);
+            blk(buf, atlasPx, cols, tilePx, S, 30, 8, y, BD);
+        }
+        // Pommel
+        for (int x = 5; x <= 10; x++) blk(buf, atlasPx, cols, tilePx, S, 30, x, 13, BD);
+        blk(buf, atlasPx, cols, tilePx, S, 30, 6,  13, BM);
+        blk(buf, atlasPx, cols, tilePx, S, 30, 7,  13, BM);
+        blk(buf, atlasPx, cols, tilePx, S, 30, 8,  13, BM);
+        blk(buf, atlasPx, cols, tilePx, S, 30, 9,  13, BM);
+    }
+
+    // Draw an S x S block at logical grid position (lx, ly), y=0=TOP.
+    private static void blk(ByteBuffer buf, int atlasPx, int cols, int tilePx, int S,
+                             int tile, int lx, int ly, int rgb) {
+        int tx = tile % cols, ty = tile / cols;
+        for (int dy = 0; dy < S; dy++) {
+            for (int dx = 0; dx < S; dx++) {
+                int px = tx * tilePx + lx * S + dx;
+                int py = ty * tilePx + (tilePx - 1 - (ly * S + dy)); // flip y: top->high buf row
+                if (px < 0 || px >= atlasPx || py < 0 || py >= atlasPx) continue;
+                int idx = (py * atlasPx + px) * 4;
+                buf.put(idx,   (byte)((rgb >> 16) & 0xff));
+                buf.put(idx+1, (byte)((rgb >>  8) & 0xff));
+                buf.put(idx+2, (byte)(rgb & 0xff));
+                buf.put(idx+3, (byte)0xff);
+            }
+        }
     }
 
     private record Image(ByteBuffer rgba, int w, int h, boolean nativeMemory) {}

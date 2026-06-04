@@ -32,6 +32,7 @@ public class WorldRenderer {
     private final Texture atlas;
     private final Texture photonNoise;
     private final Texture sunPortrait;
+    private final Texture moonPortrait;
     private final Mesh screenQuad;
     private int rayVolumeTex = 0;
     private int rayVolumeW = 0, rayVolumeH = 0, rayVolumeD = 0;
@@ -190,6 +191,7 @@ public class WorldRenderer {
         out vec4 fragColor;
         uniform sampler2D uPhotonNoise;
         uniform sampler2D uSunPortrait;
+        uniform sampler2D uMoonPortrait;
         uniform vec3 uSkyTop;
         uniform vec3 uSkyHorizon;
         uniform vec2 uSunScreen;
@@ -233,8 +235,17 @@ public class WorldRenderer {
                 rays += line * rayMask;
             }
             float moonDist = length(p - m);
-            float moonDisc = smoothstep(0.075, 0.0, moonDist);
             float moonGlow = exp(-moonDist * 3.6);
+            vec2 moonUv = (p - m) / vec2(0.13, 0.13) + vec2(0.5);
+            float inMoon = step(0.0, moonUv.x) * step(moonUv.x, 1.0)
+                         * step(0.0, moonUv.y) * step(moonUv.y, 1.0);
+            float moonEdge = smoothstep(0.0, 0.06, moonUv.x)
+                           * smoothstep(0.0, 0.06, moonUv.y)
+                           * smoothstep(0.0, 0.06, 1.0 - moonUv.x)
+                           * smoothstep(0.0, 0.06, 1.0 - moonUv.y);
+            float moonCircle = smoothstep(0.50, 0.40, length(moonUv - vec2(0.5)));
+            vec3 kobeColor = texture(uMoonPortrait, vec2(moonUv.x, 1.0 - moonUv.y)).rgb;
+            float moonMask = inMoon * moonEdge * moonCircle;
             // reconstruct the world-space view ray so stars stay pinned to the
             // sky rather than the screen, and drift slowly like real starlight
             vec4 viewRay = uInvProj * vec4(vPos, 1.0, 1.0);
@@ -253,7 +264,8 @@ public class WorldRenderer {
             sky += vec3(1.0, 0.70, 0.20) * uSunVisible * glow * 0.16;
             sky = mix(sky, portrait, uSunVisible * portraitMask);
             sky += vec3(1.0, 0.88, 0.58) * uSunVisible * rays * (1.0 - uRain) * 0.075;
-            sky += vec3(0.62, 0.72, 0.98) * uMoonVisible * (moonDisc * 0.50 + moonGlow * 0.045);
+            sky += vec3(0.62, 0.72, 0.98) * uMoonVisible * moonGlow * 0.045;
+            sky = mix(sky, kobeColor, uMoonVisible * moonMask);
             vec3 mappedSky = sky / (sky + vec3(0.58));
             sky = mix(sky, mappedSky, 0.25 + uRain * 0.55);
             sky = pow(max(sky, vec3(0.0)), vec3(0.82));
@@ -538,6 +550,8 @@ public class WorldRenderer {
         }
         """;
 
+    public Texture atlas() { return atlas; }
+
     public WorldRenderer(ChunkWorkerPool workers) {
         this.workers = workers;
         shader = new Shader(VERT, FRAG);
@@ -547,6 +561,9 @@ public class WorldRenderer {
         photonNoise = Texture.buildPhotonNoise();
         sunPortrait = Files.isRegularFile(Path.of("images.jpg"))
             ? Texture.loadImage(Path.of("images.jpg"), false, true)
+            : Texture.buildPhotonNoise();
+        moonPortrait = Files.isRegularFile(Path.of("kobe.jpg"))
+            ? Texture.loadImage(Path.of("kobe.jpg"), false, true)
             : Texture.buildPhotonNoise();
         screenQuad = new Mesh();
         screenQuad.upload(new float[]{
@@ -877,6 +894,8 @@ public class WorldRenderer {
         skyShader.setInt("uPhotonNoise", 1);
         sunPortrait.bind(2);
         skyShader.setInt("uSunPortrait", 2);
+        moonPortrait.bind(3);
+        skyShader.setInt("uMoonPortrait", 3);
         Vector3f top = underwater ? new Vector3f(0.02f, 0.16f, 0.34f) : env.skyTop();
         Vector3f horizon = underwater ? new Vector3f(0.04f, 0.24f, 0.45f) : env.skyHorizon();
         skyShader.setVec3("uSkyTop", top.x, top.y, top.z);

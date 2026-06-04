@@ -7,17 +7,21 @@ import java.util.Random;
 public class ZombiePigman extends Mob {
     public static final float WIDTH  = 0.6f;
     public static final float HEIGHT = 1.8f;
-    private static final float CHASE_SPEED   = 2.8f;
-    private static final float WANDER_SPEED  = 1.2f;
-    private static final float AGGRO_RANGE   = 10.0f;
-    private static final float DEAGGRO_RANGE = 22.0f;
-    private static final float ARM_SWING_AMP = 0.8f;
+    private static final float CHASE_SPEED     = 2.8f;
+    private static final float WANDER_SPEED    = 1.2f;
+    private static final float AGGRO_RANGE     = 10.0f;
+    private static final float DEAGGRO_RANGE   = 22.0f;
+    private static final float ARM_SWING_AMP   = 0.8f;
+    private static final float ATTACK_RANGE    = 1.8f;
+    private static final float ATTACK_DAMAGE   = 3f;
+    private static final float ATTACK_INTERVAL = 1.2f;
 
     private final Random rng;
     private boolean aggroed;
     private float wanderTimer;
     private float wanderAngle;
     private float armSwing;
+    private float attackCooldown;
 
     public ZombiePigman(Vector3f start) {
         super(start, 20f);
@@ -33,6 +37,7 @@ public class ZombiePigman extends Mob {
     @Override
     public void update(float dt, World world, Vector3f playerPos) {
         tickTimers(dt);
+        attackCooldown = Math.max(0f, attackCooldown - dt);
         applyKnockback(dt, world);
         snapToGround(world);
 
@@ -65,5 +70,16 @@ public class ZombiePigman extends Mob {
         }
 
         snapToGround(world);
+    }
+
+    // Returns damage dealt this tick (> 0) if the pigman landed a melee hit, 0 otherwise.
+    public float tryAttack(Vector3f playerPos) {
+        if (!aggroed || attackCooldown > 0f) return 0f;
+        float dx = playerPos.x - pos.x;
+        float dy = playerPos.y - pos.y;
+        float dz = playerPos.z - pos.z;
+        if (dx * dx + dy * dy + dz * dz > ATTACK_RANGE * ATTACK_RANGE) return 0f;
+        attackCooldown = ATTACK_INTERVAL;
+        return ATTACK_DAMAGE;
     }
 }

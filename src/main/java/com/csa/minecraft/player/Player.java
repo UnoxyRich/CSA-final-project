@@ -196,10 +196,17 @@ public class Player {
         }
         if (!spectator && input.rightClick() && input.cursorGrabbed()) {
             Raycaster.Hit h = Raycaster.cast(world, eye, dir, REACH);
-            if (h != null) {
-                // don't place inside player
-                if (!intersectsPlayer(h.px, h.py, h.pz))
-                    world.setBlock(h.px, h.py, h.pz, inv.selectedBlock());
+            if (h != null && !intersectsPlayer(h.px, h.py, h.pz)) {
+                if (creative) {
+                    // Creative: infinite blocks from fixed hotbar
+                    world.setBlock(h.px, h.py, h.pz, Inventory.CREATIVE_HOTBAR[inv.selected]);
+                } else {
+                    // Survival: consume one block from inventory
+                    Block toPlace = inv.selectedBlock();
+                    if (toPlace != Block.AIR && !toPlace.isItem() && inv.consumeSelected()) {
+                        world.setBlock(h.px, h.py, h.pz, toPlace);
+                    }
+                }
             }
         }
     }
@@ -263,6 +270,10 @@ public class Player {
         clearBreaking();
     }
 
+    public void takeDamage(float amount) {
+        damage(amount);
+    }
+
     private void damage(float amount) {
         if (amount <= 0f || settings.gameMode != GameMode.SURVIVAL) return;
         if (health <= 0f) return;
@@ -309,6 +320,8 @@ public class Player {
         if (block == Block.AIR) return;
         if (effects != null) effects.spawnBlockBreak(x, y, z, block);
         world.setBlock(x, y, z, Block.AIR);
+        // Survival: broken block drops into inventory
+        if (settings.gameMode == GameMode.SURVIVAL) inv.addBlock(block);
     }
 
     private void clearBreaking() {
@@ -317,13 +330,34 @@ public class Player {
     }
 
     private float hardness(Block block) {
-        return switch (block) {
-            case LEAVES, CHERRY_LEAVES, GLASS, WATER -> 0.45f;
-            case DIRT, GRASS, SAND -> 0.75f;
-            case WOOD, CHERRY_WOOD, PLANKS -> 1.15f;
-            case STONE -> 1.55f;
+        float base = switch (block) {
+            case LEAVES, CHERRY_LEAVES, SPRUCE_LEAVES, GLASS, WATER -> 0.45f;
+            case DIRT, GRASS, SAND, DRY_GRASS, SNOW -> 0.75f;
+            case WOOD, CHERRY_WOOD, SPRUCE_WOOD, PLANKS -> 1.15f;
+            case STONE, SANDSTONE, ICE -> 1.55f;
             default -> 1.0f;
         };
+        Block held = inv.selectedBlock();
+        if (held == Block.AXE) {
+            base *= switch (block) {
+                case WOOD, CHERRY_WOOD, SPRUCE_WOOD, PLANKS,
+                     LEAVES, CHERRY_LEAVES, SPRUCE_LEAVES -> 0.3f;
+                default -> 0.8f;
+            };
+        } else if (held == Block.PICKAXE) {
+            base *= switch (block) {
+                case STONE, SANDSTONE, ICE -> 0.3f;
+                default -> 0.85f;
+            };
+        } else if (held == Block.SHOVEL) {
+            base *= switch (block) {
+                case DIRT, GRASS, SAND, DRY_GRASS, SNOW -> 0.3f;
+                default -> 0.85f;
+            };
+        } else if (held == Block.SWORD) {
+            base *= 0.65f;
+        }
+        return base;
     }
 
     private boolean isInWater(World world) {

@@ -1,5 +1,6 @@
 package com.csa.minecraft.entity;
 
+import com.csa.minecraft.player.Player;
 import com.csa.minecraft.world.World;
 import org.joml.Vector3f;
 
@@ -50,24 +51,28 @@ public class MobManager {
         }
     }
 
-    public void update(float dt, World world, Vector3f playerPos) {
+    public void update(float dt, World world, Vector3f playerPos, Player player) {
         for (Pig p          : pigs)   p.update(dt, world, playerPos);
         for (Cow c          : cows)   c.update(dt, world, playerPos);
-        for (ZombiePigman z : pigmen) z.update(dt, world, playerPos);
+        for (ZombiePigman z : pigmen) {
+            z.update(dt, world, playerPos);
+            float dmg = z.tryAttack(playerPos);
+            if (dmg > 0f) player.takeDamage(dmg);
+        }
         pigs.removeIf(p -> !p.isAlive());
         cows.removeIf(c -> !c.isAlive());
         pigmen.removeIf(z -> !z.isAlive());
     }
 
     // Returns true if a mob within reach was hit. The nearest mob along the ray is damaged.
-    public boolean tryHit(Vector3f origin, Vector3f dir, float reach) {
+    public boolean tryHit(Vector3f origin, Vector3f dir, float reach, float damageMult) {
         float bestT = reach;
         Mob best = null;
         for (Pig p          : pigs)   { float t = rayHit(origin, dir, p); if (t >= 0 && t < bestT) { bestT = t; best = p; } }
         for (Cow c          : cows)   { float t = rayHit(origin, dir, c); if (t >= 0 && t < bestT) { bestT = t; best = c; } }
         for (ZombiePigman z : pigmen) { float t = rayHit(origin, dir, z); if (t >= 0 && t < bestT) { bestT = t; best = z; } }
         if (best == null) return false;
-        best.damage(2f);
+        best.damage(2f * damageMult);
         best.knockback(origin.x, origin.z);
         return true;
     }

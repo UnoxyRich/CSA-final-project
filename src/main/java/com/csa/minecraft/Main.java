@@ -8,6 +8,7 @@ import com.csa.minecraft.render.*;
 import com.csa.minecraft.world.*;
 import org.joml.Vector3f;
 
+import static org.lwjgl.glfw.GLFW.GLFW_KEY_E;
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE;
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_SLASH;
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_T;
@@ -42,6 +43,8 @@ public class Main {
         MobManager mobs = new MobManager();
         BlockEffectsRenderer blockEffects = new BlockEffectsRenderer();
         HudRenderer hud = new HudRenderer(settings);
+        hud.setAtlas(worldRenderer.atlas());
+        CraftingMenu craftingMenu = new CraftingMenu(settings);
         SettingsMenu menu = new SettingsMenu(settings);
         ChatOverlay chat = new ChatOverlay(settings);
         DeathScreen deathScreen = new DeathScreen(settings);
@@ -127,11 +130,14 @@ public class Main {
             } else if (!menu.isOpen() && input.keyPressed(GLFW_KEY_T)) {
                 chat.open(input);
                 input.grabCursor(false);
+            } else if (input.keyPressed(GLFW_KEY_E) && player != null
+                       && !menu.isOpen() && !console.active() && !chat.isOpen()) {
+                if (craftingMenu.isOpen()) { craftingMenu.close(player.inventory()); input.grabCursor(true); }
+                else                       { craftingMenu.open();                    input.grabCursor(false); }
             } else if (input.keyPressed(GLFW_KEY_ESCAPE)) {
-                // ESC toggles the settings menu. Opening the menu ungrabs the cursor;
-                // closing it re-grabs and pauses are released.
-                if (menu.isOpen()) { menu.close(); input.grabCursor(true); }
-                else               { menu.open();  input.grabCursor(false); }
+                if (craftingMenu.isOpen()) { craftingMenu.close(player.inventory()); input.grabCursor(true); }
+                else if (menu.isOpen())    { menu.close(); input.grabCursor(true); }
+                else                       { menu.open();  input.grabCursor(false); }
             }
             if (startScreen.isOpen()) {
                 // Start screen owns input until a world is created.
@@ -143,6 +149,10 @@ public class Main {
                 // Death screen pauses the world until revive/reset or quit.
             } else if (worldChangedThisFrame) {
                 // Do not let the menu button click also act as a world click.
+            } else if (craftingMenu.isOpen()) {
+                craftingMenu.update(window.width(), window.height(),
+                                    input.cursorX(), input.cursorY(),
+                                    input.leftClick(), input.rightClick(), player.inventory());
             } else if (menu.isOpen()) {
                 menu.update(window.width(), window.height(),
                             input.cursorX(), input.cursorY(), input.leftClick(), input);
@@ -160,11 +170,14 @@ public class Main {
                 if (!input.cursorGrabbed() && input.leftClick()) input.grabCursor(true);
                 if (input.leftClick() && input.cursorGrabbed()) {
                     Camera hitCam = player.camera(window.aspect());
-                    mobs.tryHit(hitCam.pos, hitCam.forward, 6f);
+                    Block heldTool = player.inventory().selectedBlock();
+                    float dmgMult = heldTool == Block.SWORD ? 2.5f
+                                  : heldTool == Block.AXE   ? 1.8f : 1.0f;
+                    mobs.tryHit(hitCam.pos, hitCam.forward, 6f, dmgMult);
                 }
                 player.update(dt, input, world, blockEffects);
                 milkFrog.update(dt, world, player.position());
-                mobs.update(dt, world, player.position());
+                mobs.update(dt, world, player.position(), player);
                 world.update(player.position());
             }
 
@@ -193,6 +206,9 @@ public class Main {
                     hud.renderCommandConsole(window.width(), window.height(), console.text());
                 }
             }
+            if (craftingMenu.isOpen() && player != null)
+                craftingMenu.render(window.width(), window.height(), hud,
+                                    player.inventory(), input.cursorX(), input.cursorY());
             menu.render(hud, window.width(), window.height());
             chat.render(hud, window.width(), window.height());
             deathScreen.render(hud, window.width(), window.height());
