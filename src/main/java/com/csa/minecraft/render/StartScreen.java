@@ -1,6 +1,9 @@
 package com.csa.minecraft.render;
 
 import com.csa.minecraft.Settings;
+import com.csa.minecraft.engine.Input;
+
+import static org.lwjgl.glfw.GLFW.*;
 
 public class StartScreen {
     public enum Action {
@@ -12,9 +15,11 @@ public class StartScreen {
 
     private final Settings settings;
     private boolean open = true;
+    // Digits (and optional leading minus) typed into the seed field
+    private String seedInput = "";
 
     private static final int PANEL_W = 460;
-    private static final int PANEL_H = 330;
+    private static final int PANEL_H = 390;
     private static final int BUTTON_W = 270;
     private static final int BUTTON_H = 42;
 
@@ -25,8 +30,34 @@ public class StartScreen {
     public boolean isOpen() { return open; }
     public void close() { open = false; }
 
-    public Action update(int viewW, int viewH, double cursorPx, double cursorPy, boolean clicked) {
-        if (!open || !clicked) return Action.NONE;
+    /** The raw seed string the player typed, empty string if nothing was entered. */
+    public String seedText() { return seedInput; }
+
+    public Action update(int viewW, int viewH, double cursorPx, double cursorPy,
+                         boolean clicked, Input input) {
+        if (!open) return Action.NONE;
+
+        // Process keyboard: only digits, optional leading minus, backspace, enter
+        if (input != null) {
+            String chars = input.consumeTypedChars();
+            for (int i = 0; i < chars.length(); i++) {
+                char c = chars.charAt(i);
+                if (c == '-' && seedInput.isEmpty()) {
+                    seedInput += c;
+                } else if (c >= '0' && c <= '9' && seedInput.length() < 18) {
+                    seedInput += c;
+                }
+            }
+            if (input.keyPressed(GLFW_KEY_BACKSPACE) && !seedInput.isEmpty()) {
+                seedInput = seedInput.substring(0, seedInput.length() - 1);
+            }
+            // Enter / numpad-enter launches with the current seed
+            if (input.keyPressed(GLFW_KEY_ENTER) || input.keyPressed(GLFW_KEY_KP_ENTER)) {
+                return Action.CREATE_WORLD;
+            }
+        }
+
+        if (!clicked) return Action.NONE;
 
         int panelW = s(PANEL_W);
         int panelH = s(PANEL_H);
@@ -35,7 +66,7 @@ public class StartScreen {
         int btnW = s(BUTTON_W);
         int btnH = s(BUTTON_H);
         int btnX = panelX + (panelW - btnW) / 2;
-        int createY = panelY + s(138);
+        int createY = panelY + s(160);
         int randomY = createY + btnH + s(16);
         int quitY = randomY + btnH + s(16);
 
@@ -63,13 +94,35 @@ public class StartScreen {
 
         drawCentered(hud, "NAILONGCRAFT", panelX, panelW, panelY + s(28), titleScale,
                      0.95f, 0.95f, 0.95f, 1f);
-        drawCentered(hud, "CREATE A WORLD", panelX, panelW, panelY + s(92), textScale,
+
+        // Seed input section
+        int seedLabelY = panelY + s(68);
+        int seedFieldY = panelY + s(86);
+        int fieldW = panelW - s(40);
+        int fieldX = panelX + s(20);
+        int fieldH = s(28);
+
+        drawCentered(hud, "SEED (LEAVE BLANK FOR DEFAULT):", panelX, panelW,
+                     seedLabelY, textScale, 0.72f, 0.88f, 1f, 0.95f);
+        hud.rectPx(fieldX, seedFieldY, fieldW, fieldH, 0.04f, 0.06f, 0.08f, 0.92f);
+        outline(hud, fieldX, seedFieldY, fieldW, fieldH, s(1), 0.45f, 0.65f, 1f, 0.9f);
+
+        String display = seedInput.isEmpty() ? "(DEFAULT)" : seedInput;
+        float seedAlpha = seedInput.isEmpty() ? 0.4f : 1f;
+        float seedR = seedInput.isEmpty() ? 0.7f : 1f;
+        float seedG = seedInput.isEmpty() ? 0.7f : 1f;
+        float seedB = seedInput.isEmpty() ? 0.7f : 0.85f;
+        hud.drawText(display, fieldX + s(7),
+                     seedFieldY + (fieldH - BitmapFont.H * textScale) / 2f,
+                     textScale, seedR, seedG, seedB, seedAlpha);
+
+        drawCentered(hud, "CREATE A WORLD", panelX, panelW, panelY + s(126), textScale,
                      0.72f, 0.88f, 1f, 0.95f);
 
         int btnW = s(BUTTON_W);
         int btnH = s(BUTTON_H);
         int btnX = panelX + (panelW - btnW) / 2;
-        int createY = panelY + s(138);
+        int createY = panelY + s(160);
         int randomY = createY + btnH + s(16);
         int quitY = randomY + btnH + s(16);
 

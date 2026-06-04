@@ -69,12 +69,24 @@ public class Main {
             if (startScreen.isOpen()) {
                 StartScreen.Action action = startScreen.update(window.width(), window.height(),
                                                                input.cursorX(), input.cursorY(),
-                                                               input.leftClick());
+                                                               input.leftClick(), input);
                 if (action == StartScreen.Action.CREATE_WORLD ||
                     action == StartScreen.Action.CREATE_RANDOM_WORLD) {
-                    currentSeed = action == StartScreen.Action.CREATE_RANDOM_WORLD
-                        ? System.nanoTime()
-                        : WORLD_SEED;
+                    if (action == StartScreen.Action.CREATE_RANDOM_WORLD) {
+                        currentSeed = System.nanoTime();
+                    } else {
+                        // Use player-entered seed if provided, otherwise fall back to default
+                        String seedText = startScreen.seedText();
+                        if (!seedText.isEmpty()) {
+                            try {
+                                currentSeed = Long.parseLong(seedText);
+                            } catch (NumberFormatException e) {
+                                currentSeed = WORLD_SEED;
+                            }
+                        } else {
+                            currentSeed = WORLD_SEED;
+                        }
+                    }
                     world = new World(currentSeed, workers);
                     world.setRenderDistance(settings.renderDistance);
                     Vector3f spawn = prepareSpawn(world);
