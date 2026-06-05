@@ -325,7 +325,7 @@ public class Player {
             return;
         }
         Block block = world.getBlock(h.x, h.y, h.z);
-        if (block == Block.AIR) {
+        if (block == Block.AIR || block == Block.NETHER_PORTAL) {
             clearBreaking();
             return;
         }
