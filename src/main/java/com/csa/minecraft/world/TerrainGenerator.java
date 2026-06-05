@@ -8,7 +8,7 @@ import java.util.Random;
  * then drives surface blocks, water freezing, and which decoration (trees, cacti) is
  * scattered. Generation is deterministic per (seed, chunk).
  */
-public class TerrainGenerator {
+public class TerrainGenerator implements WorldGenerator {
     public static final int SEA_LEVEL = 62;
     /** Columns at or above this height get a snow cap (except hot biomes). */
     private static final int SNOW_LINE = 96;

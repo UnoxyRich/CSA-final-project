@@ -111,9 +111,10 @@ public class WorldRenderer {
         uniform float uUnderwater;
         uniform int uRenderPass;
         void main(){
-            float blockWater = 1.0 - smoothstep(0.25, 0.75, abs(vBlock - 11.0));
-            float blockGlass = 1.0 - smoothstep(0.25, 0.75, abs(vBlock - 8.0));
-            float transparent = max(blockWater, blockGlass);
+            float blockWater  = 1.0 - smoothstep(0.25, 0.75, abs(vBlock - 11.0));
+            float blockGlass  = 1.0 - smoothstep(0.25, 0.75, abs(vBlock - 8.0));
+            float blockPortal = 1.0 - smoothstep(0.25, 0.75, abs(vBlock - 27.0));
+            float transparent = max(max(blockWater, blockGlass), blockPortal);
             if (uRenderPass == 0 && transparent > 0.5) discard;
             if (uRenderPass == 1 && transparent < 0.5) discard;
 
@@ -171,7 +172,12 @@ public class WorldRenderer {
             lit = pow(max(lit, vec3(0.0)), vec3(0.88));
             float fog = clamp((vDist - uFogStart) / max(0.0001, uFogEnd - uFogStart), 0.0, 1.0);
             fog = mix(fog, clamp(vDist / 34.0, 0.0, 1.0), uUnderwater);
+            // Nether portal: pulsing purple glow
+            float portalPulse = blockPortal * (0.65 + 0.35 * sin(uTime * 2.8 + vWorldPos.y * 1.8));
+            lit = mix(lit, vec3(0.38, 0.05, 0.85) * 1.8, blockPortal * 0.60);
+            lit += blockPortal * vec3(0.18, 0.02, 0.55) * portalPulse;
             float alpha = mix(c.a, 0.38 + fresnel * 0.18, water);
+            alpha = mix(alpha, 0.52 + 0.14 * portalPulse, blockPortal);
             fragColor = vec4(mix(lit, uFogColor, fog), alpha);
         }
         """;

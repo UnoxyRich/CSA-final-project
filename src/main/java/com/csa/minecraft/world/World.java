@@ -18,7 +18,7 @@ public class World {
     // meshing) while the main thread inserts/removes chunks. Only the main
     // thread ever mutates the map; workers only read.
     private final Map<Long, Chunk> chunks = new ConcurrentHashMap<>();
-    private final TerrainGenerator gen;
+    private final WorldGenerator gen;
     private final ChunkWorkerPool workers;
     // Keys of chunks currently being generated on a worker — prevents the ring
     // scan from submitting the same chunk twice.
@@ -32,6 +32,12 @@ public class World {
 
     public World(long seed, ChunkWorkerPool workers) {
         this.gen = new TerrainGenerator(seed);
+        this.workers = workers;
+    }
+
+    /** Use a custom generator (e.g. NetherGenerator). */
+    public World(WorldGenerator gen, ChunkWorkerPool workers) {
+        this.gen = gen;
         this.workers = workers;
     }
 
@@ -77,6 +83,11 @@ public class World {
         c.set(lx, wy, lz, b);
         if (oldBlock != b || oldMeta != 0) blockRevision++;
         markBlockDirty(cx, cz, lx, lz);
+        // When obsidian is placed, check if a nether portal frame was completed.
+        // NETHER_PORTAL placement itself does not trigger this (no infinite loop).
+        if (b == Block.OBSIDIAN) {
+            PortalHelper.checkAndActivate(this, wx, wy, wz);
+        }
     }
 
     private void setLoadedBlockWithMeta(int wx, int wy, int wz, Block b, int meta) {

@@ -106,7 +106,10 @@ public class Texture {
         palettes[28] = colors(0x888888, 0x9a9a9a, 0x7a5030); // pickaxe: stone + handle
         palettes[29] = colors(0x888888, 0x9a9a9a, 0x7a5030); // axe: stone + handle
         palettes[30] = colors(0x909090, 0xa0a0a0, 0x7a5030); // shovel: gray + handle
-        for (int i = 31; i < palettes.length; i++) palettes[i] = colors(0xff00ff, 0x000000);
+        palettes[31] = colors(0x0d0818, 0x1a0f2c, 0x150c22, 0x221438); // obsidian: dark purple-black
+        palettes[32] = colors(0x6b2020, 0x7e2525, 0x591a1a, 0x832a2a); // netherrack: dark red
+        palettes[33] = colors(0x5a1a8a, 0x7a30b0, 0x6020a0, 0x4a1070); // nether portal: purple
+        for (int i = 34; i < palettes.length; i++) palettes[i] = colors(0xff00ff, 0x000000);
 
         Random rng = new Random(7);
         for (int ti = 0; ti < cols * cols; ti++) {
@@ -128,6 +131,16 @@ public class Texture {
             }
         }
 
+        // Make nether portal tile semi-transparent so the blend pass shows through
+        {
+            int ptx = 33 % cols, pty = 33 / cols;
+            for (int py2 = 0; py2 < tile; py2++) {
+                for (int px2 = 0; px2 < tile; px2++) {
+                    int idx2 = ((pty * tile + py2) * size + ptx * tile + px2) * 4;
+                    buf.put(idx2 + 3, (byte) 155);
+                }
+            }
+        }
         // Draw pixel-art item icons over tiles 26-30 (transparent background)
         drawItemIcons(buf, size, cols, tile);
 
@@ -196,6 +209,26 @@ public class Texture {
             fillTile(atlas, size, tile, cols, 28, 0x909090);
             fillTile(atlas, size, tile, cols, 29, 0x909090);
             fillTile(atlas, size, tile, cols, 30, 0x909090);
+            // Tile 31: obsidian (try vanilla texture, fall back to dark fill)
+            try { putTile(atlas, size, tile, cols, 31, load(zip, "obsidian")); }
+            catch (Exception e) { fillTile(atlas, size, tile, cols, 31, 0x150c22); }
+            // Tile 32: netherrack
+            try { putTile(atlas, size, tile, cols, 32, load(zip, "netherrack")); }
+            catch (Exception e) { fillTile(atlas, size, tile, cols, 32, 0x6b2020); }
+            // Tile 33: nether portal (purple, semi-transparent)
+            fillTile(atlas, size, tile, cols, 33, 0x6020a0);
+        }
+        // Make nether portal tile semi-transparent in resource-pack atlas too
+        {
+            int cols2 = 8, tile2 = 128;
+            int ptx = 33 % cols2, pty = 33 / cols2;
+            int atlasPx2 = tile2 * cols2;
+            for (int py2 = 0; py2 < tile2; py2++) {
+                for (int px2 = 0; px2 < tile2; px2++) {
+                    int idx2 = ((pty * tile2 + py2) * atlasPx2 + ptx * tile2 + px2) * 4;
+                    atlas.put(idx2 + 3, (byte) 155);
+                }
+            }
         }
         // Pixel-art item icons (works for any tile size via scale factor)
         drawItemIcons(atlas, size, cols, tile);

@@ -9,8 +9,11 @@ public enum Block {
     SNOW(true), ICE(true), CACTUS(true), SANDSTONE(true),
     SPRUCE_WOOD(true), SPRUCE_LEAVES(true), DRY_GRASS(true),
     ROCKET(true),
+    OBSIDIAN(true),
     // Non-placeable crafting items (solid=false, isItem()=true)
-    STICK(false), SWORD(false), PICKAXE(false), AXE(false), SHOVEL(false);
+    STICK(false), SWORD(false), PICKAXE(false), AXE(false), SHOVEL(false),
+    // Nether blocks (appended at end so all existing ordinals stay stable)
+    NETHERRACK(true), NETHER_PORTAL(false);
 
     public final boolean solid;
     Block(boolean s) { this.solid = s; }
@@ -48,6 +51,9 @@ public enum Block {
             case SPRUCE_LEAVES: return 21;
             case DRY_GRASS:     return face == 0 ? 22 : (face == 1 ? 0 : 23);
             case ROCKET:        return face == 1 ? 25 : 24;
+            case OBSIDIAN:      return 31;
+            case NETHERRACK:    return 32;
+            case NETHER_PORTAL: return 33;
             case STICK:    return 26;
             case SWORD:    return 27;
             case PICKAXE:  return 28;

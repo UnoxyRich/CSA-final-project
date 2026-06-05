@@ -14,7 +14,9 @@ import static org.lwjgl.glfw.GLFW.*;
 public class Player {
     public static final float WIDTH = 0.6f, HEIGHT = 1.8f, EYE = 1.6f;
     public static final float SPEED = 5.0f, FLY_SPEED = 12.0f, JUMP = 9.0f, GRAVITY = 28.0f;
-    public static final float REACH = 6.0f;
+    public static final float REACH = 4.5f;
+    public static final float ATTACK_REACH = 3.0f;
+    public static final float ATTACK_COOLDOWN_TIME = 0.6f;
     public static final float MAX_HEALTH = 20.0f;
     private static final float SPRINT_MULTIPLIER = 1.55f;
     private static final float CREATIVE_FLY_TAP_WINDOW = 0.28f;
@@ -51,6 +53,7 @@ public class Player {
     private boolean sprinting = false;
     private float cactusDamageTimer = 0f;
     private float damageShakeTimer = 0f;
+    private float attackCooldownTimer = 0f;
     private float health = MAX_HEALTH;
     private final Inventory inv = new Inventory();
     private final Settings settings;
@@ -92,6 +95,7 @@ public class Player {
         else creativeFlyTapTimer = Math.max(0f, creativeFlyTapTimer - dt);
         cactusDamageTimer = Math.max(0f, cactusDamageTimer - dt);
         damageShakeTimer = Math.max(0f, damageShakeTimer - dt);
+        attackCooldownTimer = Math.max(0f, attackCooldownTimer - dt);
 
         // hotbar select
         for (int i = 0; i < 9; i++) {
@@ -256,6 +260,15 @@ public class Player {
         health = Math.min(MAX_HEALTH, health + amount);
     }
 
+    /** Instantly moves the player to a new position (dimension switch). */
+    public void teleportTo(Vector3f target) {
+        pos.set(target);
+        vel.zero();
+        onGround = false;
+        inWater = false;
+        underwater = false;
+    }
+
     public void respawn(Vector3f spawn) {
         pos.set(spawn);
         vel.zero();
@@ -267,7 +280,23 @@ public class Player {
         sprinting = false;
         cactusDamageTimer = 0f;
         damageShakeTimer = 0f;
+        attackCooldownTimer = 0f;
         clearBreaking();
+    }
+
+    /**
+     * Attempt a melee swing. Returns true if the attack lands (cooldown ready),
+     * false if still on cooldown. Resets the cooldown timer on success.
+     */
+    public boolean tryAttack() {
+        if (attackCooldownTimer > 0f) return false;
+        attackCooldownTimer = ATTACK_COOLDOWN_TIME;
+        return true;
+    }
+
+    /** 0 = fully charged/ready, 1 = just attacked (cooldown full). */
+    public float attackCooldownFraction() {
+        return attackCooldownTimer / ATTACK_COOLDOWN_TIME;
     }
 
     public void takeDamage(float amount) {

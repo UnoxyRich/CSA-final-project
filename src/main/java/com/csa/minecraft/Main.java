@@ -6,7 +6,10 @@ import com.csa.minecraft.entity.MobManager;
 import com.csa.minecraft.player.*;
 import com.csa.minecraft.render.*;
 import com.csa.minecraft.world.*;
+import com.csa.minecraft.NetherEnvironment;
+import org.joml.Matrix4f;
 import org.joml.Vector3f;
+import org.joml.Vector4f;
 
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_E;
 import static org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE;
@@ -15,10 +18,14 @@ import static org.lwjgl.glfw.GLFW.GLFW_KEY_T;
 import static org.lwjgl.opengl.GL11.*;
 
 public class Main {
-    private static final long WORLD_SEED = 1337L;
-    private static final int SPAWN_X = 8;
-    private static final int SPAWN_Z = 8;
+    private static final long WORLD_SEED  = 1337L;
+    private static final int  SPAWN_X     = 8;
+    private static final int  SPAWN_Z     = 8;
     private static final float SPAWN_SKIN = 0.01f;
+    // Portal entry: player must stand in portal for this many seconds to teleport
+    private static final float PORTAL_CHARGE_TIME = 4.0f;
+    // After teleporting, block re-entry for this many seconds (prevents bounce)
+    private static final float PORTAL_COOLDOWN_TIME = 3.5f;
 
     public static void main(String[] args) {
         Window window = new Window("NailongCraft", 1280, 720);
@@ -31,6 +38,14 @@ public class Main {
         MilkFrog milkFrog = null;
         long currentSeed = WORLD_SEED;
         Environment environment = new Environment();
+        Environment netherEnv = new NetherEnvironment();
+        // Nether dimension state
+        World netherWorld = null;
+        MobManager netherMobs = new MobManager();
+        boolean inNether = false;
+        float portalTimer = 0f;          // charge timer while standing in portal
+        float portalCooldown = 0f;       // post-teleport cooldown (prevent bounce)
+        Vector3f overworldReturnPos = null; // saved position for returning from nether
         CommandConsole console = new CommandConsole();
         // Worker pool for off-thread chunk generation and mesh building. One
         // pool for the whole process, shared by every World that gets created.
@@ -64,7 +79,13 @@ public class Main {
 
             input.poll();
             environment.update(dt);
+            // Tick portal cooldown every frame
+            if (portalCooldown > 0f) portalCooldown -= dt;
             boolean worldChangedThisFrame = false;
+            // Active world/mobs/env based on dimension
+            World  activeWorld = inNether ? netherWorld : world;
+            MobManager activeMobs = inNether ? netherMobs : mobs;
+            Environment activeEnv = inNether ? netherEnv : environment;
 
             if (startScreen.isOpen()) {
                 StartScreen.Action action = startScreen.update(window.width(), window.height(),
@@ -93,6 +114,12 @@ public class Main {
                     player = new Player(new Vector3f(spawn), settings);
                     milkFrog = MilkFrog.nearPlayer(world, player.position());
                     mobs.spawnNearPlayer(world, player.position());
+                    // Reset nether state for the new game
+                    netherWorld = null;
+                    inNether = false;
+                    portalTimer = 0f;
+                    portalCooldown = 0f;
+                    overworldReturnPos = null;
                     startScreen.close();
                     worldChangedThisFrame = true;
                     input.grabCursor(true);
@@ -118,6 +145,11 @@ public class Main {
                     player.respawn(new Vector3f(spawn));
                     milkFrog = MilkFrog.nearPlayer(world, player.position());
                     mobs.spawnNearPlayer(world, player.position());
+                    // Always return to overworld on death
+                    inNether = false;
+                    portalTimer = 0f;
+                    portalCooldown = 0f;
+                    overworldReturnPos = null;
                     deathScreen.close();
                     worldChangedThisFrame = true;
                     input.grabCursor(true);
@@ -172,48 +204,145 @@ public class Main {
                     menu.close();
                     input.grabCursor(true);
                 }
-                // Apply any settings that have downstream state (render distance).
-                if (world.renderDistance() != settings.renderDistance) {
+                // Apply render distance to both worlds when changed.
+                if (world != null && world.renderDistance() != settings.renderDistance)
                     world.setRenderDistance(settings.renderDistance);
-                }
+                if (netherWorld != null && netherWorld.renderDistance() != settings.renderDistance)
+                    netherWorld.setRenderDistance(settings.renderDistance);
             } else {
                 // If user clicks on the world after the menu released the cursor (e.g.
                 // they alt-tabbed and clicked back in), re-grab the cursor.
                 if (!input.cursorGrabbed() && input.leftClick()) input.grabCursor(true);
-                if (input.leftClick() && input.cursorGrabbed()) {
+                if (input.leftClick() && input.cursorGrabbed() && player.tryAttack()) {
                     Camera hitCam = player.camera(window.aspect());
                     Block heldTool = player.inventory().selectedBlock();
                     float dmgMult = heldTool == Block.SWORD ? 2.5f
                                   : heldTool == Block.AXE   ? 1.8f : 1.0f;
-                    mobs.tryHit(hitCam.pos, hitCam.forward, 6f, dmgMult);
+                    activeMobs.tryHit(hitCam.pos, hitCam.forward, Player.ATTACK_REACH, dmgMult);
                 }
-                player.update(dt, input, world, blockEffects);
-                milkFrog.update(dt, world, player.position());
-                mobs.update(dt, world, player.position(), player);
-                world.update(player.position());
+                player.update(dt, input, activeWorld, blockEffects);
+                if (!inNether && milkFrog != null) milkFrog.update(dt, world, player.position());
+                activeMobs.update(dt, activeWorld, player.position(), player);
+                activeWorld.update(player.position());
+
+                // --- Nether portal detection ---
+                if (portalCooldown <= 0f) {
+                    Vector3f pp = player.position();
+                    int fx = (int) Math.floor(pp.x);
+                    int fy = (int) Math.floor(pp.y);
+                    int fz = (int) Math.floor(pp.z);
+                    boolean inPortal = activeWorld.getBlock(fx, fy, fz) == Block.NETHER_PORTAL
+                                    || activeWorld.getBlock(fx, fy + 1, fz) == Block.NETHER_PORTAL;
+                    if (inPortal) {
+                        portalTimer += dt;
+                        if (portalTimer >= PORTAL_CHARGE_TIME) {
+                            portalTimer = 0f;
+                            portalCooldown = PORTAL_COOLDOWN_TIME;
+                            if (!inNether) {
+                                // Save position and enter nether
+                                overworldReturnPos = new Vector3f(pp);
+                                boolean firstEntry = (netherWorld == null);
+                                if (firstEntry) {
+                                    netherWorld = new World(
+                                            new NetherGenerator(currentSeed), workers);
+                                    netherWorld.setRenderDistance(settings.renderDistance);
+                                    // Force-load spawn chunks synchronously
+                                    for (int dz = -3; dz <= 3; dz++)
+                                        for (int dx = -3; dx <= 3; dx++)
+                                            netherWorld.chunkAt(dx, dz);
+                                }
+                                Vector3f ns = findNetherSpawn(netherWorld);
+                                player.teleportTo(ns);
+                                // Build a return portal a few blocks away from spawn
+                                int rpx = (int) Math.floor(ns.x) - 1;
+                                int rpy = (int) Math.floor(ns.y) - 1;
+                                int rpz = (int) Math.floor(ns.z) + 4;
+                                PortalHelper.placePortalXY(netherWorld, rpx, rpy, rpz);
+                                if (firstEntry) netherMobs.initNether(netherWorld, ns);
+                                inNether = true;
+                            } else {
+                                // Return to overworld
+                                Vector3f ret = overworldReturnPos != null
+                                        ? overworldReturnPos
+                                        : new Vector3f(SPAWN_X + 0.5f, 80f, SPAWN_Z + 0.5f);
+                                player.teleportTo(new Vector3f(ret.x, ret.y + 0.1f, ret.z));
+                                inNether = false;
+                            }
+                            worldChangedThisFrame = true;
+                        }
+                    } else {
+                        portalTimer = Math.max(0f, portalTimer - dt * 2f);
+                    }
+                }
             }
 
             glViewport(0, 0, window.width(), window.height());
-            Vector3f fog = player != null && player.isUnderwater()
+            // Re-evaluate active state after potential teleport this frame
+            World  renderWorld = inNether ? netherWorld : world;
+            MobManager renderMobs = inNether ? netherMobs : mobs;
+            Environment renderEnv = inNether ? netherEnv : environment;
+            Vector3f fog = (player != null && player.isUnderwater())
                 ? new Vector3f(0.04f, 0.22f, 0.42f)
-                : environment.fogColor();
+                : renderEnv.fogColor();
             glClearColor(fog.x, fog.y, fog.z, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-            if (world != null && player != null) {
+            if (renderWorld != null && player != null) {
                 Camera cam = applyDamageShake(player.camera(window.aspect()), player,
                                               (float) org.lwjgl.glfw.GLFW.glfwGetTime(),
                                               window.aspect(), settings);
-                worldRenderer.render(world, cam, environment, window.width(), window.height(),
+                worldRenderer.render(renderWorld, cam, renderEnv, window.width(), window.height(),
                                      player.isUnderwater(), settings.rayTracingLighting);
-                milkFrogRenderer.render(milkFrog, cam);
-                mobRenderer.render(mobs, cam);
-                weatherRenderer.render(world, cam, environment);
+                if (!inNether && milkFrog != null) milkFrogRenderer.render(milkFrog, cam);
+                mobRenderer.render(renderMobs, cam);
+                // Floating name tag above Zhuimu
+                var zhuimuAlly = renderMobs.ally();
+                if (zhuimuAlly != null && zhuimuAlly.isAlive()) {
+                    Vector3f ap = zhuimuAlly.position();
+                    float tagWY = ap.y + zhuimuAlly.height() + 0.40f;
+                    Matrix4f pv = new Matrix4f(cam.proj).mul(cam.view);
+                    Vector4f clip = pv.transform(new Vector4f(ap.x, tagWY, ap.z, 1.0f));
+                    if (clip.w > 0.0f) {
+                        float ndcX = clip.x / clip.w;
+                        float ndcY = clip.y / clip.w;
+                        if (ndcX >= -1.05f && ndcX <= 1.05f && ndcY >= -1.05f && ndcY <= 1.05f) {
+                            int ww = window.width(), wh = window.height();
+                            float sx = (ndcX + 1.0f) * 0.5f * ww;
+                            float sy = (1.0f - ndcY) * 0.5f * wh;
+                            float tsc = 1.8f * Math.max(0.1f, settings.guiScale);
+                            String tagName = "Zhuimu";
+                            float tw = tagName.length() * BitmapFont.ADVANCE * tsc;
+                            hud.begin2D(ww, wh);
+                            // Dark background plate
+                            hud.rectPx(sx - tw * 0.5f - 3f, sy - 2f,
+                                       tw + 6f, 9f * tsc + 4f, 0f, 0f, 0f, 0.55f);
+                            // Drop shadow
+                            hud.drawText(tagName, sx - tw * 0.5f + tsc * 0.5f,
+                                         sy + tsc * 0.5f, tsc, 0f, 0f, 0f, 0.8f);
+                            // Name in lime green
+                            hud.drawText(tagName, sx - tw * 0.5f, sy, tsc,
+                                         0.20f, 0.90f, 0.15f, 1.0f);
+                            hud.end2D();
+                        }
+                    }
+                }
+                if (!inNether) weatherRenderer.render(world, cam, environment);
                 blockEffects.render(cam, dt, player.breakingX(), player.breakingY(), player.breakingZ(),
                                     player.breakProgress());
                 hud.render(window.width(), window.height(), player.inventory(),
                            player.health(), player.maxHealth());
-                hud.renderWeatherOverlay(window.width(), window.height(), environment,
+                hud.renderWeatherOverlay(window.width(), window.height(), renderEnv,
                                          (float) org.lwjgl.glfw.GLFW.glfwGetTime());
+                // Boss health bar (nether only)
+                if (inNether && netherMobs.boss() != null) {
+                    hud.renderBossBar(window.width(), window.height(),
+                            netherMobs.boss().health(), 200f,
+                            "Huanwoshiwanmeidao");
+                }
+                // Portal charge indicator
+                if (portalTimer > 0f) {
+                    hud.renderPortalBar(window.width(), window.height(),
+                            portalTimer / PORTAL_CHARGE_TIME);
+                }
                 if (console.active()) {
                     hud.renderCommandConsole(window.width(), window.height(), console.text());
                 }
@@ -235,6 +364,20 @@ public class Main {
         }
         workers.shutdown();
         window.destroy();
+    }
+
+    /** Finds a safe standing spot near (0,0) in the nether world. */
+    private static Vector3f findNetherSpawn(World netherWorld) {
+        for (int r = 0; r <= 20; r++) {
+            for (int dz = -r; dz <= r; dz++) {
+                for (int dx = -r; dx <= r; dx++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != r) continue;
+                    Vector3f s = spawnAtColumn(netherWorld, dx, dz);
+                    if (s != null) return s;
+                }
+            }
+        }
+        return new Vector3f(0.5f, 15f + SPAWN_SKIN, 0.5f);
     }
 
     private static Vector3f prepareSpawn(World world) {
@@ -289,7 +432,7 @@ public class Main {
 
     private static boolean isSpawnGround(Block block) {
         return switch (block) {
-            case GRASS, DIRT, STONE, SAND, SNOW, ICE, SANDSTONE, DRY_GRASS -> true;
+            case GRASS, DIRT, STONE, SAND, SNOW, ICE, SANDSTONE, DRY_GRASS, NETHERRACK -> true;
             default -> false;
         };
     }

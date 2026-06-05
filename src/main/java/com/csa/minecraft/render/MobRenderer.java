@@ -6,8 +6,10 @@ import com.csa.minecraft.engine.Shader;
 import com.csa.minecraft.entity.Cow;
 import com.csa.minecraft.entity.Mob;
 import com.csa.minecraft.entity.MobManager;
+import com.csa.minecraft.entity.NetherBoss;
 import com.csa.minecraft.entity.Pig;
 import com.csa.minecraft.entity.ZombiePigman;
+import com.csa.minecraft.entity.Zhuimu;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 
@@ -34,6 +36,15 @@ public class MobRenderer {
     private static final float ZOM_R = 0.38f, ZOM_G = 0.58f, ZOM_B = 0.30f;
     private static final float GOLD_R = 0.90f, GOLD_G = 0.78f, GOLD_B = 0.15f;
     private static final float GOLD_D_R = 0.72f, GOLD_D_G = 0.58f, GOLD_D_B = 0.10f;
+
+    // Nether boss - dark red/maroon body, glowing eyes
+    private static final float BOSS_R = 0.48f, BOSS_G = 0.08f, BOSS_B = 0.08f;
+    private static final float BOSS_EYE_R = 1.0f, BOSS_EYE_G = 0.5f, BOSS_EYE_B = 0.0f;
+    private static final float CROWN_R = 0.95f, CROWN_G = 0.82f, CROWN_B = 0.10f;
+
+    // Ally Zhuimu - lime-green head/arms, white body/legs (matches reference skin)
+    private static final float ALY_GREEN_R = 0.18f, ALY_GREEN_G = 0.82f, ALY_GREEN_B = 0.10f;
+    private static final float ALY_WHITE_R = 1.00f, ALY_WHITE_G = 1.00f, ALY_WHITE_B = 1.00f;
 
     // Shared
     private static final float EYE_R = 0.05f, EYE_G = 0.05f, EYE_B = 0.05f;
@@ -62,7 +73,10 @@ public class MobRenderer {
     }
 
     public void render(MobManager mobs, Camera cam) {
-        if (mobs.pigs().isEmpty() && mobs.cows().isEmpty() && mobs.pigmen().isEmpty()) return;
+        boolean hasMobs = !mobs.pigs().isEmpty() || !mobs.cows().isEmpty()
+                       || !mobs.pigmen().isEmpty()
+                       || mobs.boss() != null || mobs.ally() != null;
+        if (!hasMobs) return;
         glDisable(GL_CULL_FACE);
         shader.use();
         shader.setMat4("uView", cam.view);
@@ -70,10 +84,13 @@ public class MobRenderer {
         for (Pig p          : mobs.pigs())   renderPig(p);
         for (Cow c          : mobs.cows())   renderCow(c);
         for (ZombiePigman z : mobs.pigmen()) renderZombiePigman(z);
+        if (mobs.boss() != null && mobs.boss().isAlive()) renderNetherBoss(mobs.boss());
+        if (mobs.ally() != null && mobs.ally().isAlive()) renderZhuimu(mobs.ally());
         hurtFactor = 0f;
         for (Pig p          : mobs.pigs())   renderHealthBar(p, cam);
         for (Cow c          : mobs.cows())   renderHealthBar(c, cam);
         for (ZombiePigman z : mobs.pigmen()) renderHealthBar(z, cam);
+        if (mobs.ally() != null && mobs.ally().isAlive()) renderHealthBar(mobs.ally(), cam);
         glEnable(GL_CULL_FACE);
     }
 
@@ -167,6 +184,74 @@ public class MobRenderer {
         // Eyes
         cuboid(base, -0.14f, 1.83f, -0.28f, 0.08f, 0.08f, 0.03f, EYE_R,   EYE_G,   EYE_B);
         cuboid(base, +0.14f, 1.83f, -0.28f, 0.08f, 0.08f, 0.03f, EYE_R,   EYE_G,   EYE_B);
+    }
+
+    // --- Nether Boss (Huanwoshiwanmeidao) ---
+
+    private void renderNetherBoss(NetherBoss boss) {
+        hurtFactor = Math.min(1f, boss.hurtTimer() / 0.3f);
+        Vector3f p = boss.position();
+        float leg = 0.55f * (float) Math.sin(boss.animTime());
+        float arm = boss.armSwing();
+        // Scale factor: boss is 1.4 wide and 2.8 tall vs pigman 0.6 x 1.8 => ~1.55x
+        float sc = 1.55f;
+        Matrix4f base = new Matrix4f().translate(p.x, p.y, p.z).rotateY(boss.yaw()).scale(sc, sc, sc);
+
+        // Legs
+        legCuboid(base, -0.15f, 0.75f, 0f, 0.30f, 0.75f, 0.30f, +leg, BOSS_R, BOSS_G, BOSS_B);
+        legCuboid(base, +0.15f, 0.75f, 0f, 0.30f, 0.75f, 0.30f, -leg, BOSS_R, BOSS_G, BOSS_B);
+        // Torso
+        cuboid(base, 0f, 1.14f, 0f, 0.60f, 0.80f, 0.36f, BOSS_R, BOSS_G, BOSS_B);
+        // Arms
+        legCuboid(base, -0.45f, 1.55f, 0f, 0.28f, 0.76f, 0.28f, -arm, BOSS_R, BOSS_G, BOSS_B);
+        Matrix4f armPivot = new Matrix4f(base).translate(0.45f, 1.55f, 0f).rotateX(arm);
+        draw(new Matrix4f(armPivot).translate(0f, -0.38f, 0f).scale(0.28f, 0.76f, 0.28f),
+             BOSS_R, BOSS_G, BOSS_B);
+        draw(new Matrix4f(armPivot).translate(0.10f, -1.10f, -0.04f).scale(0.09f, 0.90f, 0.09f),
+             GOLD_R, GOLD_G, GOLD_B);
+        draw(new Matrix4f(armPivot).translate(0.10f, -0.68f, -0.04f).scale(0.34f, 0.08f, 0.12f),
+             GOLD_D_R, GOLD_D_G, GOLD_D_B);
+        // Big pig head
+        cuboid(base, 0f, 1.80f, 0f, 0.64f, 0.54f, 0.64f, PIG_R, PIG_G, PIG_B);
+        // Snout
+        cuboid(base, 0f, 1.68f, -0.36f, 0.32f, 0.24f, 0.14f, SNOUT_R, SNOUT_G, SNOUT_B);
+        // Horns (crown-like spikes)
+        cuboid(base, -0.24f, 2.24f, -0.12f, 0.10f, 0.30f, 0.10f, CROWN_R, CROWN_G, CROWN_B);
+        cuboid(base, +0.24f, 2.24f, -0.12f, 0.10f, 0.30f, 0.10f, CROWN_R, CROWN_G, CROWN_B);
+        cuboid(base,   0.0f, 2.30f, -0.12f, 0.10f, 0.36f, 0.10f, CROWN_R, CROWN_G, CROWN_B);
+        // Glowing orange eyes
+        cuboid(base, -0.16f, 1.88f, -0.33f, 0.10f, 0.10f, 0.03f, BOSS_EYE_R, BOSS_EYE_G, BOSS_EYE_B);
+        cuboid(base, +0.16f, 1.88f, -0.33f, 0.10f, 0.10f, 0.03f, BOSS_EYE_R, BOSS_EYE_G, BOSS_EYE_B);
+    }
+
+    // --- Ally Zhuimu (lime-green head + arms, white body + legs) ---
+
+    private void renderZhuimu(Zhuimu z) {
+        hurtFactor = Math.min(1f, z.hurtTimer() / 0.3f);
+        Vector3f p = z.position();
+        float legSwing = 0.50f * (float) Math.sin(z.animTime());
+        float arm = z.armSwing();
+        Matrix4f base = new Matrix4f().translate(p.x, p.y, p.z).rotateY(z.yaw());
+
+        // Legs - white
+        legCuboid(base, -0.15f, 0.75f, 0f, 0.26f, 0.75f, 0.26f, +legSwing,
+                  ALY_WHITE_R, ALY_WHITE_G, ALY_WHITE_B);
+        legCuboid(base, +0.15f, 0.75f, 0f, 0.26f, 0.75f, 0.26f, -legSwing,
+                  ALY_WHITE_R, ALY_WHITE_G, ALY_WHITE_B);
+        // Torso - white
+        cuboid(base, 0f, 1.12f, 0f, 0.52f, 0.76f, 0.30f,
+               ALY_WHITE_R, ALY_WHITE_G, ALY_WHITE_B);
+        // Arms - lime green (same as head)
+        legCuboid(base, -0.38f, 1.50f, 0f, 0.24f, 0.70f, 0.24f, -arm,
+                  ALY_GREEN_R, ALY_GREEN_G, ALY_GREEN_B);
+        legCuboid(base, +0.38f, 1.50f, 0f, 0.24f, 0.70f, 0.24f, +arm,
+                  ALY_GREEN_R, ALY_GREEN_G, ALY_GREEN_B);
+        // Head - lime green cube
+        cuboid(base, 0f, 1.76f, 0f, 0.50f, 0.50f, 0.50f,
+               ALY_GREEN_R, ALY_GREEN_G, ALY_GREEN_B);
+        // Dark eyes
+        cuboid(base, -0.12f, 1.84f, -0.26f, 0.08f, 0.07f, 0.03f, EYE_R, EYE_G, EYE_B);
+        cuboid(base, +0.12f, 1.84f, -0.26f, 0.08f, 0.07f, 0.03f, EYE_R, EYE_G, EYE_B);
     }
 
     // --- Health bars ---

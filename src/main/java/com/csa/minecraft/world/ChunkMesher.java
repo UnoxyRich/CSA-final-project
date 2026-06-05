@@ -56,7 +56,7 @@ public class ChunkMesher {
     }
 
     private static boolean isTransparent(Block b) {
-        return b == Block.GLASS || b == Block.WATER;
+        return b == Block.GLASS || b == Block.WATER || b == Block.NETHER_PORTAL;
     }
 
     /**

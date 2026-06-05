@@ -129,7 +129,8 @@ public class Environment {
     public Vector3f ambient() {
         float day = daylight();
         float dusk = twilight();
-        Vector3f clear = mix(new Vector3f(0.105f, 0.120f, 0.175f),
+        // Night value is much darker so blocks are visibly dim at night
+        Vector3f clear = mix(new Vector3f(0.028f, 0.032f, 0.055f),
                              new Vector3f(0.46f, 0.50f, 0.57f), day);
         clear = mix(clear, new Vector3f(0.31f, 0.30f, 0.36f), dusk * 0.55f);
         return switch (weather) {
@@ -153,7 +154,8 @@ public class Environment {
     }
 
     public float sunIntensity() {
-        float clear = daylight() * 1.08f + twilight() * 0.34f + night() * 0.18f;
+        // night() multiplier kept small so moonlit surfaces stay dark
+        float clear = daylight() * 1.08f + twilight() * 0.34f + night() * 0.07f;
         return switch (weather) {
             case CLEAR -> clear;
             case RAIN -> clear * 0.52f;

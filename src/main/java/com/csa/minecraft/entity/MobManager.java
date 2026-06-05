@@ -1,6 +1,7 @@
 package com.csa.minecraft.entity;
 
 import com.csa.minecraft.player.Player;
+import com.csa.minecraft.world.Block;
 import com.csa.minecraft.world.World;
 import org.joml.Vector3f;
 
@@ -8,6 +9,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.function.Consumer;
+
+@SuppressWarnings("unchecked")
 
 public class MobManager {
     // Max total mobs alive at once
@@ -35,9 +38,17 @@ public class MobManager {
     private final Random             rng    = new Random();
     private float spawnTimer = 0f;
 
+    // Nether-specific entities (null when not in nether)
+    private NetherBoss boss      = null;
+    private Zhuimu     ally      = null;
+    // When true, pigs and cows are never spawned (used for the nether manager)
+    private boolean    netherMode = false;
+
     public List<Pig>          pigs()   { return pigs; }
     public List<Cow>          cows()   { return cows; }
     public List<ZombiePigman> pigmen() { return pigmen; }
+    public NetherBoss         boss()   { return boss; }
+    public Zhuimu             ally()   { return ally; }
 
     /** Called once at world start to seed mobs close to the player. */
     public void spawnNearPlayer(World world, Vector3f playerPos) {
@@ -47,6 +58,45 @@ public class MobManager {
         spawnGroup(world, rng, px, pz, 5, INIT_MIN_R, INIT_MAX_R, s -> pigs.add(new Pig(s)));
         spawnGroup(world, rng, px, pz, 4, INIT_MIN_R, INIT_MAX_R, s -> cows.add(new Cow(s)));
         spawnGroup(world, rng, px, pz, 3, INIT_MIN_R, INIT_MAX_R, s -> pigmen.add(new ZombiePigman(s)));
+    }
+
+    /**
+     * Initialises the nether mob set: boss Huanwoshiwanmeidao, 10 pig gods,
+     * and the ally Zhuimu.  Call this once when the player first enters the nether.
+     */
+    public void initNether(World world, Vector3f playerPos) {
+        netherMode = true;
+        pigs.clear();
+        cows.clear();
+        int px = (int) Math.floor(playerPos.x);
+        int pz = (int) Math.floor(playerPos.z);
+
+        // Boss: 18-25 blocks away from player
+        Vector3f bossPos = null;
+        for (int attempt = 0; attempt < 40 && bossPos == null; attempt++) {
+            double angle = rng.nextDouble() * Math.PI * 2;
+            int r = 18 + rng.nextInt(8);
+            bossPos = Mob.spawnAtColumn(world, px + (int)(Math.cos(angle)*r),
+                                               pz + (int)(Math.sin(angle)*r));
+        }
+        if (bossPos == null) bossPos = new Vector3f(px + 18f, playerPos.y, pz);
+        boss = new NetherBoss(bossPos);
+
+        // 10 pigmen at medium range
+        pigmen.clear();
+        spawnGroup(world, rng, px, pz, 10, INIT_MIN_R, INIT_MAX_R,
+                   s -> pigmen.add(new ZombiePigman(s)));
+
+        // Ally Zhuimu: 4-7 blocks from player
+        Vector3f allyPos = null;
+        for (int attempt = 0; attempt < 20 && allyPos == null; attempt++) {
+            double angle = rng.nextDouble() * Math.PI * 2;
+            int r = 4 + rng.nextInt(4);
+            allyPos = Mob.spawnAtColumn(world, px + (int)(Math.cos(angle)*r),
+                                               pz + (int)(Math.sin(angle)*r));
+        }
+        if (allyPos == null) allyPos = new Vector3f(px + 5f, playerPos.y, pz);
+        ally = new Zhuimu(allyPos);
     }
 
     /** Try to place one mob at a random position in [minR, maxR] from (px,pz). */
@@ -83,6 +133,34 @@ public class MobManager {
             float dmg = z.tryAttack(playerPos);
             if (dmg > 0f) player.takeDamage(dmg);
         }
+
+        // Boss AI and attacks
+        if (boss != null && boss.isAlive()) {
+            boss.update(dt, world, playerPos);
+            float dmg = boss.tryAttack(playerPos);
+            if (dmg > 0f) player.takeDamage(dmg);
+        }
+
+        // Ally Zhuimu follows and fights
+        if (ally != null && ally.isAlive()) {
+            List<Mob> enemies = new ArrayList<>();
+            for (ZombiePigman z : pigmen) if (z.isAlive()) enemies.add(z);
+            if (boss != null && boss.isAlive()) enemies.add(boss);
+            ally.update(dt, world, playerPos, enemies);
+        }
+
+        // Zombie pigman death drop: give obsidian directly to player inventory
+        for (ZombiePigman z : pigmen) {
+            if (!z.isAlive()) {
+                player.inventory().addBlock(Block.OBSIDIAN);
+            }
+        }
+        // Boss death drop: give 5 obsidian
+        if (boss != null && !boss.isAlive()) {
+            for (int i = 0; i < 5; i++) player.inventory().addBlock(Block.OBSIDIAN);
+            boss = null; // only drop once
+        }
+
         // Remove dead mobs
         pigs.removeIf(p -> !p.isAlive());
         cows.removeIf(c -> !c.isAlive());
@@ -98,9 +176,9 @@ public class MobManager {
             spawnTimer = 0f;
             int px = (int) Math.floor(playerPos.x);
             int pz = (int) Math.floor(playerPos.z);
-            if (pigs.size()   < MAX_PIGS)
+            if (!netherMode && pigs.size() < MAX_PIGS)
                 spawnOne(world, rng, px, pz, ROAM_MIN_R, ROAM_MAX_R, s -> pigs.add(new Pig(s)));
-            if (cows.size()   < MAX_COWS)
+            if (!netherMode && cows.size() < MAX_COWS)
                 spawnOne(world, rng, px, pz, ROAM_MIN_R, ROAM_MAX_R, s -> cows.add(new Cow(s)));
             if (pigmen.size() < MAX_PIGMEN)
                 spawnOne(world, rng, px, pz, ROAM_MIN_R, ROAM_MAX_R, s -> pigmen.add(new ZombiePigman(s)));
@@ -114,6 +192,12 @@ public class MobManager {
         for (Pig p          : pigs)   { float t = rayHit(origin, dir, p); if (t >= 0 && t < bestT) { bestT = t; best = p; } }
         for (Cow c          : cows)   { float t = rayHit(origin, dir, c); if (t >= 0 && t < bestT) { bestT = t; best = c; } }
         for (ZombiePigman z : pigmen) { float t = rayHit(origin, dir, z); if (t >= 0 && t < bestT) { bestT = t; best = z; } }
+        // Boss is hittable by player
+        if (boss != null && boss.isAlive()) {
+            float t = rayHit(origin, dir, boss);
+            if (t >= 0 && t < bestT) { bestT = t; best = boss; }
+        }
+        // Ally (Zhuimu) is never hit by the player
         if (best == null) return false;
         best.damage(2f * damageMult);
         best.knockback(origin.x, origin.z);

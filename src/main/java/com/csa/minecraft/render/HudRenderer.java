@@ -231,6 +231,38 @@ public class HudRenderer {
         end2D();
     }
 
+    /** Renders a prominent boss health bar at the top centre of the screen. */
+    public void renderBossBar(int w, int h, float health, float maxHealth, String name) {
+        begin2D(w, h);
+        float gui = Math.max(0.1f, settings.guiScale);
+        float barW = 320f * gui;
+        float barH = 14f * gui;
+        float x = (w - barW) * 0.5f;
+        float y = 22f * gui;
+        float pct = maxHealth <= 0f ? 0f : Math.max(0f, Math.min(1f, health / maxHealth));
+        rectPx(x - 2*gui, y - 2*gui, barW + 4*gui, barH + 4*gui, 0.04f, 0.02f, 0.06f, 0.92f);
+        rectPx(x, y, barW, barH, 0.15f, 0.02f, 0.02f, 0.90f);
+        rectPx(x, y, barW * pct, barH, 0.62f, 0.05f, 0.85f, 1f);
+        float tsc = 1.9f * gui;
+        float tw  = name.length() * BitmapFont.ADVANCE * tsc;
+        drawText(name, (w - tw) * 0.5f + tsc, y + barH + 5f*gui + tsc, tsc, 0f,  0f,  0f,  0.8f);
+        drawText(name, (w - tw) * 0.5f,       y + barH + 5f*gui,       tsc, 0.9f, 0.6f, 1.0f, 1f);
+        end2D();
+    }
+
+    /** Renders a portal charge indicator (fills a small purple bar below crosshair). */
+    public void renderPortalBar(int w, int h, float fraction) {
+        begin2D(w, h);
+        float gui = Math.max(0.1f, settings.guiScale);
+        float barW = 80f * gui;
+        float barH = 6f  * gui;
+        float x = (w - barW) * 0.5f;
+        float y = h * 0.5f + 18f * gui;
+        rectPx(x, y, barW, barH, 0.10f, 0.02f, 0.20f, 0.75f);
+        rectPx(x, y, barW * fraction, barH, 0.55f, 0.05f, 0.95f, 1f);
+        end2D();
+    }
+
     public void renderCommandConsole(int w, int h, String text) {
         begin2D(w, h);
         float gui   = Math.max(0.1f, settings.guiScale);
@@ -306,6 +338,9 @@ public class HudRenderer {
             case SPRUCE_LEAVES: return new float[]{0.12f, 0.29f, 0.16f};
             case DRY_GRASS:     return new float[]{0.60f, 0.67f, 0.30f};
             case ROCKET:        return new float[]{0.85f, 0.87f, 0.93f};
+            case OBSIDIAN:      return new float[]{0.08f, 0.04f, 0.15f};
+            case NETHERRACK:    return new float[]{0.42f, 0.13f, 0.13f};
+            case NETHER_PORTAL: return new float[]{0.35f, 0.05f, 0.80f};
             case STICK:    return new float[]{0.55f, 0.35f, 0.17f};
             case SWORD:    return new float[]{0.69f, 0.74f, 0.80f};
             case PICKAXE:  return new float[]{0.60f, 0.60f, 0.60f};

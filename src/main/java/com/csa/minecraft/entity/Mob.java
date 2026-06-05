@@ -136,7 +136,7 @@ public abstract class Mob {
 
     static boolean isGround(Block block) {
         return switch (block) {
-            case GRASS, DIRT, STONE, SAND, SNOW, ICE, SANDSTONE, DRY_GRASS -> true;
+            case GRASS, DIRT, STONE, SAND, SNOW, ICE, SANDSTONE, DRY_GRASS, NETHERRACK -> true;
             default -> false;
         };
     }
