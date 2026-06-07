@@ -62,8 +62,9 @@ public class Main {
         CraftingMenu craftingMenu = new CraftingMenu(settings);
         SettingsMenu menu = new SettingsMenu(settings);
         ChatOverlay chat = new ChatOverlay(settings);
-        DeathScreen deathScreen = new DeathScreen(settings);
-        StartScreen startScreen = new StartScreen(settings);
+        DeathScreen   deathScreen   = new DeathScreen(settings);
+        VictoryScreen victoryScreen = new VictoryScreen(settings);
+        StartScreen   startScreen   = new StartScreen(settings);
         input.grabCursor(false);
 
         glEnable(GL_DEPTH_TEST);
@@ -120,6 +121,7 @@ public class Main {
                     portalTimer = 0f;
                     portalCooldown = 0f;
                     overworldReturnPos = null;
+                    victoryScreen.close();
                     startScreen.close();
                     worldChangedThisFrame = true;
                     input.grabCursor(true);
@@ -132,6 +134,28 @@ public class Main {
                 chat.close();
                 console.close();
                 input.grabCursor(false);
+            }
+
+            if (victoryScreen.isOpen()) {
+                VictoryScreen.Action vAction = victoryScreen.update(window.width(), window.height(),
+                                                                    input.cursorX(), input.cursorY(),
+                                                                    input.leftClick());
+                if (vAction == VictoryScreen.Action.CONTINUE) {
+                    // Return to overworld and keep playing
+                    if (overworldReturnPos != null) {
+                        player.teleportTo(new Vector3f(overworldReturnPos.x,
+                                                       overworldReturnPos.y + 0.1f,
+                                                       overworldReturnPos.z));
+                    }
+                    inNether = false;
+                    portalTimer = 0f;
+                    portalCooldown = PORTAL_COOLDOWN_TIME;
+                    victoryScreen.close();
+                    worldChangedThisFrame = true;
+                    input.grabCursor(true);
+                } else if (vAction == VictoryScreen.Action.QUIT) {
+                    window.requestClose();
+                }
             }
 
             if (deathScreen.isOpen()) {
@@ -189,6 +213,8 @@ public class Main {
                 // Chat owns typing until closed.
             } else if (console.active()) {
                 // Commands pause world input until submitted or cancelled.
+            } else if (victoryScreen.isOpen()) {
+                // Victory screen pauses everything until the player chooses.
             } else if (deathScreen.isOpen()) {
                 // Death screen pauses the world until revive/reset or quit.
             } else if (worldChangedThisFrame) {
@@ -222,7 +248,18 @@ public class Main {
                 }
                 player.update(dt, input, activeWorld, blockEffects);
                 if (!inNether && milkFrog != null) milkFrog.update(dt, world, player.position());
+                boolean bossAliveBeforeUpdate = inNether && netherMobs.boss() != null
+                                               && netherMobs.boss().isAlive();
                 activeMobs.update(dt, activeWorld, player.position(), player);
+                // Boss just died this frame -> show victory screen
+                if (bossAliveBeforeUpdate && netherMobs.boss() == null
+                        && !victoryScreen.isOpen()) {
+                    victoryScreen.open();
+                    menu.close();
+                    chat.close();
+                    console.close();
+                    input.grabCursor(false);
+                }
                 activeWorld.update(player.position());
 
                 // --- Nether portal detection ---
@@ -353,6 +390,7 @@ public class Main {
             menu.render(hud, window.width(), window.height());
             chat.render(hud, window.width(), window.height());
             deathScreen.render(hud, window.width(), window.height());
+            victoryScreen.render(hud, window.width(), window.height());
             startScreen.render(hud, window.width(), window.height());
 
             window.swap();
