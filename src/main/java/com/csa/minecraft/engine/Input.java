@@ -72,6 +72,7 @@ public class Input {
     }
     public boolean leftClick() { return curLeft && !prevLeft; }
     public boolean rightClick() { return curRight && !prevRight; }
+    public boolean rightDown()  { return curRight; }
     public boolean leftDown() { return curLeft; }
     public float mouseDX() { return dx; }
     public float mouseDY() { return dy; }

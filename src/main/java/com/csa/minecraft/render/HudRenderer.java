@@ -79,10 +79,16 @@ public class HudRenderer {
     public void setAtlas(Texture t) { this.atlas = t; }
 
     public void render(int w, int h, Inventory inv) {
-        render(w, h, inv, 20f, 20f);
+        render(w, h, inv, 20f, 20f, 20f, 20f);
     }
 
     public void render(int w, int h, Inventory inv, float health, float maxHealth) {
+        render(w, h, inv, health, maxHealth, 20f, 20f);
+    }
+
+    public void render(int w, int h, Inventory inv,
+                       float health, float maxHealth,
+                       float hunger, float maxHunger) {
         begin2D(w, h);
         float gui = Math.max(0.1f, settings.guiScale);
 
@@ -93,6 +99,7 @@ public class HudRenderer {
         rect(-pxX * armHalf, -pxY, pxX * armHalf * 2, pxY * 2, 1,1,1,0.9f);
 
         drawHealthBar(w, h, gui, health, maxHealth);
+        drawHungerBar(w, h, gui, hunger, maxHunger);
 
         // Hotbar
         boolean creative = settings.gameMode == GameMode.CREATIVE;
@@ -223,6 +230,27 @@ public class HudRenderer {
         rectPx(x, y + barH - Math.max(1f, 2f*gui), barW, Math.max(1f, 2f*gui), 0f, 0f, 0f, 0.35f);
     }
 
+    private void drawHungerBar(int w, int h, float gui, float hunger, float maxHunger) {
+        float barW = 182f * gui;
+        float barH = 12f * gui;
+        float x    = (w - barW) * 0.5f;
+        // Positioned just below the health bar (health is at h-92, this at h-74)
+        float y    = h - 74f * gui;
+        float pct  = maxHunger <= 0f ? 0f : Math.max(0f, Math.min(1f, hunger / maxHunger));
+        // Background border
+        rectPx(x - 2f*gui, y - 2f*gui, barW + 4f*gui, barH + 4f*gui, 0.02f, 0.02f, 0.025f, 0.78f);
+        // Dark trough
+        rectPx(x, y, barW, barH, 0.18f, 0.10f, 0.02f, 0.92f);
+        // Filled portion: golden-amber, shifts to red-orange when low
+        float fillR = pct > 0.4f ? 0.88f : 0.90f;
+        float fillG = pct > 0.4f ? 0.62f : 0.28f;
+        float fillB = 0.04f;
+        rectPx(x, y, barW * pct, barH, fillR, fillG, fillB, 1f);
+        // Top highlight / bottom shadow
+        rectPx(x, y, barW, Math.max(1f, 2f*gui), 1f, 1f, 1f, 0.25f);
+        rectPx(x, y + barH - Math.max(1f, 2f*gui), barW, Math.max(1f, 2f*gui), 0f, 0f, 0f, 0.30f);
+    }
+
     public void renderWeatherOverlay(int w, int h, Environment env, float time) {
         if (env.status().isEmpty()) return;
         begin2D(w, h);
@@ -247,6 +275,30 @@ public class HudRenderer {
         float tw  = name.length() * BitmapFont.ADVANCE * tsc;
         drawText(name, (w - tw) * 0.5f + tsc, y + barH + 5f*gui + tsc, tsc, 0f,  0f,  0f,  0.8f);
         drawText(name, (w - tw) * 0.5f,       y + barH + 5f*gui,       tsc, 0.9f, 0.6f, 1.0f, 1f);
+        end2D();
+    }
+
+    /**
+     * Renders the boss last-words subtitle centred near the bottom of the screen.
+     * alpha fades from 1 (fresh) to 0 (expired).
+     */
+    public void renderBossSpeech(int w, int h, String text, float alpha) {
+        begin2D(w, h);
+        float gui  = Math.max(0.1f, settings.guiScale);
+        float tsc  = 2.5f * gui;
+        float tw   = BitmapFont.textWidth(text) * tsc;
+        float pad  = 10f * gui;
+        float bw   = tw + pad * 2f;
+        float bh   = BitmapFont.H * tsc + pad * 2f;
+        float bx   = (w - bw) * 0.5f;
+        float by   = h * 0.72f;
+        // Dark backing plate
+        rectPx(bx - 2f, by - 2f, bw + 4f, bh + 4f, 0f, 0f, 0f, 0.55f * alpha);
+        // Shadow
+        drawText(text, bx + pad + tsc * 0.5f, by + pad + tsc * 0.5f,
+                 tsc, 0f, 0f, 0f, 0.85f * alpha);
+        // Main text in gold
+        drawText(text, bx + pad, by + pad, tsc, 1.0f, 0.85f, 0.10f, alpha);
         end2D();
     }
 
@@ -341,11 +393,13 @@ public class HudRenderer {
             case OBSIDIAN:      return new float[]{0.08f, 0.04f, 0.15f};
             case NETHERRACK:    return new float[]{0.42f, 0.13f, 0.13f};
             case NETHER_PORTAL: return new float[]{0.35f, 0.05f, 0.80f};
-            case STICK:    return new float[]{0.55f, 0.35f, 0.17f};
-            case SWORD:    return new float[]{0.69f, 0.74f, 0.80f};
-            case PICKAXE:  return new float[]{0.60f, 0.60f, 0.60f};
-            case AXE:      return new float[]{0.60f, 0.60f, 0.60f};
-            case SHOVEL:   return new float[]{0.62f, 0.62f, 0.62f};
+            case STICK:         return new float[]{0.55f, 0.35f, 0.17f};
+            case SWORD:         return new float[]{0.69f, 0.74f, 0.80f};
+            case PICKAXE:       return new float[]{0.60f, 0.60f, 0.60f};
+            case AXE:           return new float[]{0.60f, 0.60f, 0.60f};
+            case SHOVEL:        return new float[]{0.62f, 0.62f, 0.62f};
+            case RAW_PORKCHOP:  return new float[]{0.94f, 0.63f, 0.69f};
+            case RAW_STEAK:     return new float[]{0.75f, 0.25f, 0.25f};
             default:            return new float[]{1, 1, 1};
         }
     }

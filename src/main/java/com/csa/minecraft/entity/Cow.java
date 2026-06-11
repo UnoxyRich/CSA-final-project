@@ -27,7 +27,6 @@ public class Cow extends Mob {
     public void update(float dt, World world, Vector3f playerPos) {
         tickTimers(dt);
         applyKnockback(dt, world);
-        snapToGround(world);
 
         wanderTimer -= dt;
         if (wanderTimer <= 0) {
@@ -42,6 +41,6 @@ public class Cow extends Mob {
         if (!moved) wanderTimer = 0;
         animTime += dt * 5f;
 
-        snapToGround(world);
+        applyGravity(dt, world);
     }
 }

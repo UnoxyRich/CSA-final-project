@@ -13,7 +13,9 @@ public enum Block {
     // Non-placeable crafting items (solid=false, isItem()=true)
     STICK(false), SWORD(false), PICKAXE(false), AXE(false), SHOVEL(false),
     // Nether blocks (appended at end so all existing ordinals stay stable)
-    NETHERRACK(true), NETHER_PORTAL(false);
+    NETHERRACK(true), NETHER_PORTAL(false),
+    // Food items (non-placeable)
+    RAW_PORKCHOP(false), RAW_STEAK(false);
 
     public final boolean solid;
     Block(boolean s) { this.solid = s; }
@@ -21,7 +23,22 @@ public enum Block {
     /** True for items that exist only as inventory/crafting ingredients and cannot be placed. */
     public boolean isItem() {
         return this == STICK || this == SWORD || this == PICKAXE
-            || this == AXE   || this == SHOVEL;
+            || this == AXE   || this == SHOVEL
+            || this == RAW_PORKCHOP || this == RAW_STEAK;
+    }
+
+    /** True if this item can be eaten to restore hunger. */
+    public boolean isFood() {
+        return this == RAW_PORKCHOP || this == RAW_STEAK;
+    }
+
+    /** Hunger points restored when this food is eaten (0 if not food). */
+    public float hungerValue() {
+        return switch (this) {
+            case RAW_PORKCHOP -> 3.0f;
+            case RAW_STEAK    -> 3.0f;
+            default           -> 0f;
+        };
     }
 
     public static Block byId(int id) {
@@ -54,11 +71,13 @@ public enum Block {
             case OBSIDIAN:      return 31;
             case NETHERRACK:    return 32;
             case NETHER_PORTAL: return 33;
-            case STICK:    return 26;
-            case SWORD:    return 27;
-            case PICKAXE:  return 28;
-            case AXE:      return 29;
-            case SHOVEL:   return 30;
+            case STICK:         return 26;
+            case SWORD:         return 27;
+            case PICKAXE:       return 28;
+            case AXE:           return 29;
+            case SHOVEL:        return 30;
+            case RAW_PORKCHOP:  return 34;
+            case RAW_STEAK:     return 35;
             default:     return 3;
         }
     }

@@ -109,7 +109,9 @@ public class Texture {
         palettes[31] = colors(0x0d0818, 0x1a0f2c, 0x150c22, 0x221438); // obsidian: dark purple-black
         palettes[32] = colors(0x6b2020, 0x7e2525, 0x591a1a, 0x832a2a); // netherrack: dark red
         palettes[33] = colors(0x5a1a8a, 0x7a30b0, 0x6020a0, 0x4a1070); // nether portal: purple
-        for (int i = 34; i < palettes.length; i++) palettes[i] = colors(0xff00ff, 0x000000);
+        palettes[34] = colors(0xe88090, 0xf0a0b0, 0xd06070, 0xc84060); // raw porkchop: pink
+        palettes[35] = colors(0xb03030, 0xc84040, 0x902020, 0xd05050); // raw steak: deep red
+        for (int i = 36; i < palettes.length; i++) palettes[i] = colors(0xff00ff, 0x000000);
 
         Random rng = new Random(7);
         for (int ti = 0; ti < cols * cols; ti++) {
@@ -435,7 +437,8 @@ public class Texture {
     // Y-flip: bufY = tilePx - 1 - ly*S - dy.
 
     private static void drawItemIcons(ByteBuffer buf, int atlasPx, int cols, int tilePx) {
-        for (int t = 26; t <= 30; t++) {
+        // Clear item tiles (tools 26-30, food 34-35) to transparent before drawing icons
+        for (int t : new int[]{26,27,28,29,30,34,35}) {
             int tx = t % cols, ty = t / cols;
             for (int y = 0; y < tilePx; y++)
                 for (int x = 0; x < tilePx; x++) {
@@ -541,6 +544,48 @@ public class Texture {
         blk(buf, atlasPx, cols, tilePx, S, 30, 7,  13, BM);
         blk(buf, atlasPx, cols, tilePx, S, 30, 8,  13, BM);
         blk(buf, atlasPx, cols, tilePx, S, 30, 9,  13, BM);
+
+        // RAW PORKCHOP (34): rounded irregular chunk, pink with fat streaks
+        final int PK  = 0xF0A0B0; // light pink
+        final int PD  = 0xC84060; // dark pink / edge
+        final int PF  = 0xF8E8E0; // fat streak (white-ish)
+        // Main body: an irregular blob from (2,2) to (13,13)
+        for (int y = 3; y <= 12; y++) {
+            int x0 = (y <= 5 || y >= 11) ? 4 : 2;
+            int x1 = (y <= 4 || y >= 12) ? 11 : 13;
+            for (int x = x0; x <= x1; x++) {
+                int c = (x == x0 || x == x1 || y == 3 || y == 12) ? PD : PK;
+                blk(buf, atlasPx, cols, tilePx, S, 34, x, y, c);
+            }
+        }
+        // Fat streaks (horizontal highlights)
+        for (int x = 4; x <= 11; x++) blk(buf, atlasPx, cols, tilePx, S, 34, x, 6,  PF);
+        for (int x = 3; x <= 10; x++) blk(buf, atlasPx, cols, tilePx, S, 34, x, 9,  PF);
+        // Bone handle at top
+        for (int y = 0; y <= 2; y++) {
+            blk(buf, atlasPx, cols, tilePx, S, 34, 6, y, 0xE8E0D0);
+            blk(buf, atlasPx, cols, tilePx, S, 34, 7, y, 0xF0EAE0);
+            blk(buf, atlasPx, cols, tilePx, S, 34, 8, y, 0xD8D0C0);
+        }
+
+        // RAW STEAK (35): rectangular cut of beef, dark red with marbling
+        final int SK  = 0xC04040; // red meat
+        final int SD2 = 0x801818; // dark edge
+        final int SM2 = 0xE86060; // lighter highlight
+        final int SF  = 0xE8C8B0; // fat / marbling
+        // Main rectangular cut
+        for (int y = 2; y <= 13; y++) {
+            for (int x = 1; x <= 14; x++) {
+                int c = (x == 1 || x == 14 || y == 2 || y == 13) ? SD2
+                      : (x == 2 || y == 3) ? SM2
+                      : SK;
+                blk(buf, atlasPx, cols, tilePx, S, 35, x, y, c);
+            }
+        }
+        // Marbling streaks
+        for (int x = 3; x <= 12; x++) blk(buf, atlasPx, cols, tilePx, S, 35, x, 5,  SF);
+        for (int x = 4; x <= 11; x++) blk(buf, atlasPx, cols, tilePx, S, 35, x, 8,  SF);
+        for (int x = 3; x <= 10; x++) blk(buf, atlasPx, cols, tilePx, S, 35, x, 11, SF);
     }
 
     // Draw an S x S block at logical grid position (lx, ly), y=0=TOP.

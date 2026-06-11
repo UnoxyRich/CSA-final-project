@@ -47,7 +47,7 @@ public class NetherBoss extends Mob {
             animTime += dt * 7f;
             armSwing = ARM_SWING_AMP * (float) Math.sin(animTime * 1.2f);
         }
-        snapToGround(world);
+        applyGravity(dt, world);
     }
 
     /** Returns damage dealt this tick, 0 otherwise. */

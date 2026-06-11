@@ -36,20 +36,43 @@ public class ZombiePigman extends Mob {
 
     @Override
     public void update(float dt, World world, Vector3f playerPos) {
+        update(dt, world, playerPos, null);
+    }
+
+    /**
+     * Full update: chases and attacks the player or allyTarget, whichever is closer
+     * and in aggro range. Pass null for allyTarget when no ally is present.
+     */
+    public void update(float dt, World world, Vector3f playerPos, Mob allyTarget) {
         tickTimers(dt);
         attackCooldown = Math.max(0f, attackCooldown - dt);
         applyKnockback(dt, world);
-        snapToGround(world);
 
-        float dx = playerPos.x - pos.x;
-        float dz = playerPos.z - pos.z;
-        float dist2 = dx * dx + dz * dz;
+        // Pick nearest living target between player and ally
+        float pdx = playerPos.x - pos.x;
+        float pdz = playerPos.z - pos.z;
+        float playerDist2 = pdx * pdx + pdz * pdz;
 
-        if (!aggroed && dist2 < AGGRO_RANGE * AGGRO_RANGE)      aggroed = true;
-        if (aggroed  && dist2 > DEAGGRO_RANGE * DEAGGRO_RANGE)  aggroed = false;
+        Vector3f chasePos = playerPos;
+        float    chaseDist2 = playerDist2;
+        if (allyTarget != null && allyTarget.isAlive()) {
+            float adx = allyTarget.position().x - pos.x;
+            float adz = allyTarget.position().z - pos.z;
+            float allyDist2 = adx * adx + adz * adz;
+            if (allyDist2 < playerDist2) {
+                chasePos    = allyTarget.position();
+                chaseDist2  = allyDist2;
+            }
+        }
 
-        if (aggroed && dist2 > 0.001f) {
-            float dist = (float) Math.sqrt(dist2);
+        float dx = chasePos.x - pos.x;
+        float dz = chasePos.z - pos.z;
+
+        if (!aggroed && chaseDist2 < AGGRO_RANGE * AGGRO_RANGE)      aggroed = true;
+        if (aggroed  && chaseDist2 > DEAGGRO_RANGE * DEAGGRO_RANGE)  aggroed = false;
+
+        if (aggroed && chaseDist2 > 0.001f) {
+            float dist = (float) Math.sqrt(chaseDist2);
             yaw = (float) Math.atan2(-dx, -dz);
             moveHorizontal(world, (dx / dist) * CHASE_SPEED * dt, (dz / dist) * CHASE_SPEED * dt);
             animTime += dt * 9f;
@@ -69,10 +92,10 @@ public class ZombiePigman extends Mob {
             armSwing = 0f;
         }
 
-        snapToGround(world);
+        applyGravity(dt, world);
     }
 
-    // Returns damage dealt this tick (> 0) if the pigman landed a melee hit, 0 otherwise.
+    // Returns damage dealt this tick (> 0) if the pigman hit the player, 0 otherwise.
     public float tryAttack(Vector3f playerPos) {
         if (!aggroed || attackCooldown > 0f) return 0f;
         float dx = playerPos.x - pos.x;
@@ -81,5 +104,22 @@ public class ZombiePigman extends Mob {
         if (dx * dx + dy * dy + dz * dz > ATTACK_RANGE * ATTACK_RANGE) return 0f;
         attackCooldown = ATTACK_INTERVAL;
         return ATTACK_DAMAGE;
+    }
+
+    // Deals damage directly to allyTarget if in melee range.
+    // Zhuimu is agile: each swing has a 65% chance of being dodged.
+    private static final float ALLY_DODGE_CHANCE = 0.65f;
+
+    public void tryAttackAlly(Mob allyTarget) {
+        if (!aggroed || attackCooldown > 0f || allyTarget == null || !allyTarget.isAlive()) return;
+        float dx = allyTarget.position().x - pos.x;
+        float dy = allyTarget.position().y - pos.y;
+        float dz = allyTarget.position().z - pos.z;
+        if (dx * dx + dy * dy + dz * dz > ATTACK_RANGE * ATTACK_RANGE) return;
+        attackCooldown = ATTACK_INTERVAL;
+        // Zhuimu dodges most attacks due to her strafing movement
+        if (rng.nextFloat() < ALLY_DODGE_CHANCE) return;
+        allyTarget.damage(ATTACK_DAMAGE);
+        allyTarget.knockback(pos.x, pos.z);
     }
 }

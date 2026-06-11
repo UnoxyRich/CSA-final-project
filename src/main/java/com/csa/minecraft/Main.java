@@ -46,6 +46,9 @@ public class Main {
         float portalTimer = 0f;          // charge timer while standing in portal
         float portalCooldown = 0f;       // post-teleport cooldown (prevent bounce)
         Vector3f overworldReturnPos = null; // saved position for returning from nether
+        // Boss last-words subtitle shown when Huanwoshiwanmeidao is defeated
+        float bossSpeechTimer  = 0f;  // counts down while subtitle is visible
+        float victoryDelay     = 0f;  // delay before victory screen opens
         CommandConsole console = new CommandConsole();
         // Worker pool for off-thread chunk generation and mesh building. One
         // pool for the whole process, shared by every World that gets created.
@@ -81,7 +84,8 @@ public class Main {
             input.poll();
             environment.update(dt);
             // Tick portal cooldown every frame
-            if (portalCooldown > 0f) portalCooldown -= dt;
+            if (portalCooldown  > 0f) portalCooldown  -= dt;
+            if (bossSpeechTimer > 0f) bossSpeechTimer -= dt;
             boolean worldChangedThisFrame = false;
             // Active world/mobs/env based on dimension
             World  activeWorld = inNether ? netherWorld : world;
@@ -122,6 +126,8 @@ public class Main {
                     portalCooldown = 0f;
                     overworldReturnPos = null;
                     victoryScreen.close();
+                    bossSpeechTimer = 0f;
+                    victoryDelay    = 0f;
                     startScreen.close();
                     worldChangedThisFrame = true;
                     input.grabCursor(true);
@@ -248,17 +254,29 @@ public class Main {
                 }
                 player.update(dt, input, activeWorld, blockEffects);
                 if (!inNether && milkFrog != null) milkFrog.update(dt, world, player.position());
-                boolean bossAliveBeforeUpdate = inNether && netherMobs.boss() != null
-                                               && netherMobs.boss().isAlive();
+                // Track boss existence (not just alive) -- boss is set to null
+                // inside MobManager.update(), AFTER tryHit may have zeroed its health.
+                // Checking isAlive() here would return false on the kill frame because
+                // tryHit already ran above, so the condition would never fire.
+                boolean bossExistedBeforeUpdate = inNether && netherMobs.boss() != null;
                 activeMobs.update(dt, activeWorld, player.position(), player);
-                // Boss just died this frame -> show victory screen
-                if (bossAliveBeforeUpdate && netherMobs.boss() == null
-                        && !victoryScreen.isOpen()) {
-                    victoryScreen.open();
-                    menu.close();
-                    chat.close();
-                    console.close();
-                    input.grabCursor(false);
+                // Boss just died this frame -> last words subtitle, then victory
+                if (bossExistedBeforeUpdate && netherMobs.boss() == null
+                        && !victoryScreen.isOpen() && bossSpeechTimer <= 0f) {
+                    bossSpeechTimer = 3.5f; // subtitle visible for 3.5 s
+                    victoryDelay    = 2.5f; // victory screen opens after 2.5 s
+                }
+                // Tick victory delay (separate from game-logic gate so it runs
+                // even while the speech is showing)
+                if (victoryDelay > 0f) {
+                    victoryDelay -= dt;
+                    if (victoryDelay <= 0f && !victoryScreen.isOpen()) {
+                        victoryScreen.open();
+                        menu.close();
+                        chat.close();
+                        console.close();
+                        input.grabCursor(false);
+                    }
                 }
                 activeWorld.update(player.position());
 
@@ -366,7 +384,8 @@ public class Main {
                 blockEffects.render(cam, dt, player.breakingX(), player.breakingY(), player.breakingZ(),
                                     player.breakProgress());
                 hud.render(window.width(), window.height(), player.inventory(),
-                           player.health(), player.maxHealth());
+                           player.health(), player.maxHealth(),
+                           player.hunger(), Player.MAX_HUNGER);
                 hud.renderWeatherOverlay(window.width(), window.height(), renderEnv,
                                          (float) org.lwjgl.glfw.GLFW.glfwGetTime());
                 // Boss health bar (nether only)
@@ -379,6 +398,12 @@ public class Main {
                 if (portalTimer > 0f) {
                     hud.renderPortalBar(window.width(), window.height(),
                             portalTimer / PORTAL_CHARGE_TIME);
+                }
+                // Boss last-words subtitle
+                if (bossSpeechTimer > 0f) {
+                    float alpha = Math.min(1f, bossSpeechTimer / 0.6f); // fade out in last 0.6 s
+                    hud.renderBossSpeech(window.width(), window.height(),
+                                        "Zhuimu, huanwoshiwanmeidao", alpha);
                 }
                 if (console.active()) {
                     hud.renderCommandConsole(window.width(), window.height(), console.text());
@@ -406,11 +431,13 @@ public class Main {
 
     /** Finds a safe standing spot near (0,0) in the nether world. */
     private static Vector3f findNetherSpawn(World netherWorld) {
+        // Use the same column-scan logic as Mob so player lands on the same
+        // Y level as the mobs that spawn alongside them.
         for (int r = 0; r <= 20; r++) {
             for (int dz = -r; dz <= r; dz++) {
                 for (int dx = -r; dx <= r; dx++) {
                     if (Math.max(Math.abs(dx), Math.abs(dz)) != r) continue;
-                    Vector3f s = spawnAtColumn(netherWorld, dx, dz);
+                    Vector3f s = com.csa.minecraft.entity.Mob.spawnAtColumn(netherWorld, dx, dz, 85);
                     if (s != null) return s;
                 }
             }

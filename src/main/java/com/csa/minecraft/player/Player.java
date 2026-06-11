@@ -18,6 +18,13 @@ public class Player {
     public static final float ATTACK_REACH = 3.0f;
     public static final float ATTACK_COOLDOWN_TIME = 0.6f;
     public static final float MAX_HEALTH = 20.0f;
+    public static final float MAX_HUNGER = 20.0f;
+    // Hunger drain rates
+    private static final float HUNGER_SPRINT_DRAIN    = 0.25f;  // per second while sprinting
+    private static final float HUNGER_JUMP_DRAIN      = 0.20f;  // per jump
+    // Health regen when hunger is high
+    private static final float HUNGER_REGEN_THRESHOLD = 14.0f;
+    private static final float HEALTH_REGEN_RATE      = 0.5f;   // HP per second
     private static final float SPRINT_MULTIPLIER = 1.55f;
     private static final float CREATIVE_FLY_TAP_WINDOW = 0.28f;
     private static final float FALL_DAMAGE_SAFE_SPEED = 13.0f;
@@ -55,6 +62,9 @@ public class Player {
     private float damageShakeTimer = 0f;
     private float attackCooldownTimer = 0f;
     private float health = MAX_HEALTH;
+    private float hunger   = MAX_HUNGER;
+    private float eatTimer = 0f;                  // counts up while eating; resets if released
+    private static final float EAT_DURATION = 1.6f;
     private final Inventory inv = new Inventory();
     private final Settings settings;
 
@@ -133,7 +143,11 @@ public class Player {
         if (input.key(GLFW_KEY_A)) wish.sub(right);
         if (wish.lengthSquared() > 0) wish.normalize();
         sprinting = !fly && !spectator && !inWater && input.key(GLFW_KEY_LEFT_CONTROL)
-            && input.key(GLFW_KEY_W) && !input.key(GLFW_KEY_S) && health > 0f;
+            && input.key(GLFW_KEY_W) && !input.key(GLFW_KEY_S) && health > 0f && hunger > 0f;
+        // Drain hunger while sprinting (survival only)
+        if (sprinting && mode == GameMode.SURVIVAL) {
+            hunger = Math.max(0f, hunger - HUNGER_SPRINT_DRAIN * dt);
+        }
         float waterFactor = inWater && !fly && !spectator ? 0.45f : 1.0f;
         float movementSpeed = SPEED * (sprinting ? SPRINT_MULTIPLIER : 1.0f);
         float speed = (spectator ? FLY_SPEED * 1.35f : (fly ? FLY_SPEED : movementSpeed)) * waterFactor;
@@ -176,6 +190,9 @@ public class Player {
                 vel.y = JUMP;
                 onGround = false;
                 jumpBufferTimer = 0f;
+                if (mode == GameMode.SURVIVAL) {
+                    hunger = Math.max(0f, hunger - HUNGER_JUMP_DRAIN);
+                }
             }
         }
 
@@ -186,6 +203,11 @@ public class Player {
             Physics.moveAndCollide(this, world, dt);
         }
         applyCactusContactDamage(world, mode);
+
+        // Health regen from hunger (survival only)
+        if (mode == GameMode.SURVIVAL && hunger > HUNGER_REGEN_THRESHOLD && health > 0f && health < MAX_HEALTH) {
+            health = Math.min(MAX_HEALTH, health + HEALTH_REGEN_RATE * dt);
+        }
 
         // mouse interaction
         Vector3f eye = new Vector3f(pos.x, pos.y + EYE, pos.z);
@@ -198,17 +220,30 @@ public class Player {
         } else {
             clearBreaking();
         }
-        if (!spectator && input.rightClick() && input.cursorGrabbed()) {
-            Raycaster.Hit h = Raycaster.cast(world, eye, dir, REACH);
-            if (h != null && !intersectsPlayer(h.px, h.py, h.pz)) {
-                if (creative) {
-                    // Creative: infinite blocks from fixed hotbar
-                    world.setBlock(h.px, h.py, h.pz, Inventory.CREATIVE_HOTBAR[inv.selected]);
-                } else {
-                    // Survival: consume one block from inventory
-                    Block toPlace = inv.selectedBlock();
-                    if (toPlace != Block.AIR && !toPlace.isItem() && inv.consumeSelected()) {
-                        world.setBlock(h.px, h.py, h.pz, toPlace);
+        // Eating: hold right-click with food selected (survival only, hunger not full)
+        Block held = mode == GameMode.SURVIVAL ? inv.selectedBlock() : Block.AIR;
+        if (!spectator && held != null && held.isFood()
+                && hunger < MAX_HUNGER && input.rightDown() && input.cursorGrabbed()) {
+            eatTimer += dt;
+            if (eatTimer >= EAT_DURATION) {
+                eatTimer = 0f;
+                hunger = Math.min(MAX_HUNGER, hunger + held.hungerValue());
+                inv.consumeSelected();
+            }
+        } else {
+            eatTimer = 0f;
+            if (!spectator && input.rightClick() && input.cursorGrabbed()) {
+                Raycaster.Hit h = Raycaster.cast(world, eye, dir, REACH);
+                if (h != null && !intersectsPlayer(h.px, h.py, h.pz)) {
+                    if (creative) {
+                        // Creative: infinite blocks from fixed hotbar
+                        world.setBlock(h.px, h.py, h.pz, Inventory.CREATIVE_HOTBAR[inv.selected]);
+                    } else {
+                        // Survival: consume one block from inventory
+                        Block toPlace = inv.selectedBlock();
+                        if (toPlace != Block.AIR && !toPlace.isItem() && inv.consumeSelected()) {
+                            world.setBlock(h.px, h.py, h.pz, toPlace);
+                        }
                     }
                 }
             }
@@ -223,6 +258,7 @@ public class Player {
     public boolean isUnderwater() { return underwater; }
     public boolean isSprinting() { return sprinting; }
     public float health() { return health; }
+    public float hunger() { return hunger; }
     public float maxHealth() { return MAX_HEALTH; }
     public boolean isDead() { return health <= 0f; }
     public float damageShake() { return Math.max(0f, Math.min(1f, damageShakeTimer / DAMAGE_SHAKE_DURATION)); }
@@ -275,6 +311,8 @@ public class Player {
         onGround = false;
         fly = settings.gameMode == GameMode.SPECTATOR;
         health = MAX_HEALTH;
+        hunger = MAX_HUNGER;
+        eatTimer = 0f;
         inWater = false;
         underwater = false;
         sprinting = false;

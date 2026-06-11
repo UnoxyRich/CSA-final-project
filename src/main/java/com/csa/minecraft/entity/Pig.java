@@ -29,7 +29,6 @@ public class Pig extends Mob {
     public void update(float dt, World world, Vector3f playerPos) {
         tickTimers(dt);
         applyKnockback(dt, world);
-        snapToGround(world);
 
         float dx = playerPos.x - pos.x;
         float dz = playerPos.z - pos.z;
@@ -56,6 +55,6 @@ public class Pig extends Mob {
             animTime += dt * 7f;
         }
 
-        snapToGround(world);
+        applyGravity(dt, world);
     }
 }

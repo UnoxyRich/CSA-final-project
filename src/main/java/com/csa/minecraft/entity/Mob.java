@@ -7,7 +7,13 @@ import org.joml.Vector3f;
 
 public abstract class Mob {
     protected static final float GROUND_SKIN = 0.01f;
-    private static final float HURT_DURATION = 0.3f;
+    private static final float HURT_DURATION        = 0.3f;
+    private static final float GRAVITY               = 28.0f;
+    // Vertical speed (m/s) at landing that starts dealing fall damage (default 3-block drop)
+    private static final float FALL_DAMAGE_THRESHOLD = 13.0f;
+
+    /** Override to change when this mob starts taking fall damage. */
+    protected float fallDamageThreshold() { return FALL_DAMAGE_THRESHOLD; }
 
     protected final Vector3f pos;
     protected float yaw;
@@ -16,6 +22,8 @@ public abstract class Mob {
     protected float maxHealth;
     protected float hurtTimer;
     protected float kbX, kbZ;
+    protected float velY     = 0f;
+    protected boolean onGround = false;
 
     protected Mob(Vector3f start, float maxHealth) {
         this.pos = start;
@@ -67,14 +75,15 @@ public abstract class Mob {
 
     // Returns true if any horizontal movement was made.
     // Tries to step up 1 block when blocked (auto-jump over single-block obstacles).
+    // Also rejects moves that would put the mob into water.
     protected boolean moveHorizontal(World world, float mx, float mz) {
         boolean moved = false;
         boolean steppedUp = false;
 
         pos.x += mx;
-        if (collides(world)) {
+        if (collides(world) || touchesWater(world)) {
             pos.y += 1f;
-            if (!collides(world)) {
+            if (!collides(world) && !touchesWater(world)) {
                 steppedUp = true;
                 moved = true;
             } else {
@@ -86,10 +95,10 @@ public abstract class Mob {
         }
 
         pos.z += mz;
-        if (collides(world)) {
+        if (collides(world) || touchesWater(world)) {
             if (!steppedUp) {
                 pos.y += 1f;
-                if (!collides(world)) {
+                if (!collides(world) && !touchesWater(world)) {
                     moved = true;
                 } else {
                     pos.y -= 1f;
@@ -105,9 +114,57 @@ public abstract class Mob {
         return moved;
     }
 
+    // Returns true if any block in the mob's AABB is water.
+    protected boolean touchesWater(World world) {
+        float hw = width() / 2f;
+        int minX = (int) Math.floor(pos.x - hw);
+        int maxX = (int) Math.floor(pos.x + hw);
+        int minY = (int) Math.floor(pos.y);
+        int maxY = (int) Math.floor(pos.y + height() * 0.5f); // only check lower half
+        int minZ = (int) Math.floor(pos.z - hw);
+        int maxZ = (int) Math.floor(pos.z + hw);
+        for (int x = minX; x <= maxX; x++)
+            for (int y = minY; y <= maxY; y++)
+                for (int z = minZ; z <= maxZ; z++)
+                    if (world.getBlock(x, y, z) == Block.WATER) return true;
+        return false;
+    }
+
+    /**
+     * Applies gravity, moves the mob vertically, resolves ground/ceiling
+     * collisions, and deals fall damage when landing hard.
+     * Call once per update tick, after horizontal movement.
+     */
+    protected void applyGravity(float dt, World world) {
+        onGround = false;
+        velY -= GRAVITY * dt;
+        pos.y += velY * dt;
+
+        if (collides(world)) {
+            if (velY <= 0f) {
+                // Feet hit the floor: snap up to surface
+                float impactSpeed = -velY;
+                pos.y = (float) Math.floor(pos.y);
+                while (collides(world)) pos.y += 1f;
+                pos.y += GROUND_SKIN;
+                onGround = true;
+                // Apply fall damage proportional to excess impact speed
+                float fdt = fallDamageThreshold();
+                if (impactSpeed > fdt) {
+                    damage((impactSpeed - fdt) * 0.5f);
+                }
+            } else {
+                // Head hit a ceiling: push down below the block
+                pos.y = (float) Math.floor(pos.y + height()) - height() - GROUND_SKIN;
+            }
+            velY = 0f;
+        }
+    }
+
+    /** Teleports the mob to the top of the column below it (used at spawn only). */
     protected void snapToGround(World world) {
         Vector3f ground = spawnAtColumn(world, (int) Math.floor(pos.x), (int) Math.floor(pos.z));
-        if (ground != null) pos.y = ground.y;
+        if (ground != null) { pos.y = ground.y; velY = 0f; onGround = true; }
     }
 
     protected boolean collides(World world) {
@@ -125,8 +182,15 @@ public abstract class Mob {
         return false;
     }
 
-    static Vector3f spawnAtColumn(World world, int x, int z) {
-        for (int y = Chunk.SY - 3; y >= 0; y--) {
+    public static Vector3f spawnAtColumn(World world, int x, int z) {
+        return spawnAtColumn(world, x, z, Chunk.SY - 3);
+    }
+
+    /** Like spawnAtColumn(world, x, z) but starts the downward search at startY
+     *  instead of the world ceiling. Used for the nether, where the cave ceiling
+     *  can have air pockets that look like a high "ground" plateau. */
+    public static Vector3f spawnAtColumn(World world, int x, int z, int startY) {
+        for (int y = Math.min(startY, Chunk.SY - 3); y >= 0; y--) {
             if (!isGround(world.getBlock(x, y, z))) continue;
             if (world.getBlock(x, y + 1, z) != Block.AIR) continue;
             return new Vector3f(x + 0.5f, y + 1f + GROUND_SKIN, z + 0.5f);

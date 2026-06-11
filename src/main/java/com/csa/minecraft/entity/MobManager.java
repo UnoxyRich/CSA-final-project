@@ -2,6 +2,7 @@ package com.csa.minecraft.entity;
 
 import com.csa.minecraft.player.Player;
 import com.csa.minecraft.world.Block;
+import com.csa.minecraft.world.Chunk;
 import com.csa.minecraft.world.World;
 import org.joml.Vector3f;
 
@@ -77,14 +78,14 @@ public class MobManager {
             double angle = rng.nextDouble() * Math.PI * 2;
             int r = 18 + rng.nextInt(8);
             bossPos = Mob.spawnAtColumn(world, px + (int)(Math.cos(angle)*r),
-                                               pz + (int)(Math.sin(angle)*r));
+                                               pz + (int)(Math.sin(angle)*r), NETHER_SPAWN_MAX_Y);
         }
         if (bossPos == null) bossPos = new Vector3f(px + 18f, playerPos.y, pz);
         boss = new NetherBoss(bossPos);
 
         // 10 pigmen at medium range
         pigmen.clear();
-        spawnGroup(world, rng, px, pz, 10, INIT_MIN_R, INIT_MAX_R,
+        spawnGroupNether(world, rng, px, pz, 10, INIT_MIN_R, INIT_MAX_R,
                    s -> pigmen.add(new ZombiePigman(s)));
 
         // Ally Zhuimu: 4-7 blocks from player
@@ -93,21 +94,30 @@ public class MobManager {
             double angle = rng.nextDouble() * Math.PI * 2;
             int r = 4 + rng.nextInt(4);
             allyPos = Mob.spawnAtColumn(world, px + (int)(Math.cos(angle)*r),
-                                               pz + (int)(Math.sin(angle)*r));
+                                               pz + (int)(Math.sin(angle)*r), NETHER_SPAWN_MAX_Y);
         }
         if (allyPos == null) allyPos = new Vector3f(px + 5f, playerPos.y, pz);
         ally = new Zhuimu(allyPos);
     }
 
+    // Caps the spawn search below the nether's ceiling-bias zone (y>=88) so mobs
+    // don't spawn on a high cave-ceiling plateau instead of the actual floor.
+    private static final int NETHER_SPAWN_MAX_Y = 85;
+
     /** Try to place one mob at a random position in [minR, maxR] from (px,pz). */
     private static void spawnOne(World world, Random rng, int px, int pz,
                                  int minR, int maxR, Consumer<Vector3f> adder) {
+        spawnOne(world, rng, px, pz, minR, maxR, Chunk.SY - 3, adder);
+    }
+
+    private static void spawnOne(World world, Random rng, int px, int pz,
+                                 int minR, int maxR, int startY, Consumer<Vector3f> adder) {
         for (int attempt = 0; attempt < 20; attempt++) {
             int r = minR + rng.nextInt(maxR - minR + 1);
             double angle = rng.nextDouble() * Math.PI * 2;
             int ox = (int) Math.round(Math.cos(angle) * r);
             int oz = (int) Math.round(Math.sin(angle) * r);
-            Vector3f spawn = Mob.spawnAtColumn(world, px + ox, pz + oz);
+            Vector3f spawn = Mob.spawnAtColumn(world, px + ox, pz + oz, startY);
             if (spawn != null) { adder.accept(spawn); return; }
         }
     }
@@ -117,6 +127,13 @@ public class MobManager {
                                    Consumer<Vector3f> adder) {
         for (int i = 0; i < count; i++)
             spawnOne(world, rng, px, pz, minR, maxR, adder);
+    }
+
+    private static void spawnGroupNether(World world, Random rng,
+                                   int px, int pz, int count, int minR, int maxR,
+                                   Consumer<Vector3f> adder) {
+        for (int i = 0; i < count; i++)
+            spawnOne(world, rng, px, pz, minR, maxR, NETHER_SPAWN_MAX_Y, adder);
     }
 
     private static float distSq2D(Vector3f a, Vector3f b) {
@@ -129,9 +146,10 @@ public class MobManager {
         for (Pig p          : pigs)   p.update(dt, world, playerPos);
         for (Cow c          : cows)   c.update(dt, world, playerPos);
         for (ZombiePigman z : pigmen) {
-            z.update(dt, world, playerPos);
+            z.update(dt, world, playerPos, ally);
             float dmg = z.tryAttack(playerPos);
             if (dmg > 0f) player.takeDamage(dmg);
+            z.tryAttackAlly(ally);
         }
 
         // Boss AI and attacks
@@ -149,6 +167,14 @@ public class MobManager {
             ally.update(dt, world, playerPos, enemies);
         }
 
+        // Pig death drop: raw porkchop
+        for (Pig p : pigs) {
+            if (!p.isAlive()) player.inventory().addBlock(Block.RAW_PORKCHOP);
+        }
+        // Cow death drop: raw steak
+        for (Cow c : cows) {
+            if (!c.isAlive()) player.inventory().addBlock(Block.RAW_STEAK);
+        }
         // Zombie pigman death drop: give obsidian directly to player inventory
         for (ZombiePigman z : pigmen) {
             if (!z.isAlive()) {

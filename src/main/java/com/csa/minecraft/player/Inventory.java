@@ -9,7 +9,7 @@ public class Inventory {
     /** Fixed block types shown in creative mode (infinite, no count). */
     public static final Block[] CREATIVE_HOTBAR = {
         Block.GRASS, Block.DIRT, Block.STONE, Block.WOOD,
-        Block.LEAVES, Block.SAND, Block.PLANKS, Block.GLASS, Block.ROCKET
+        Block.LEAVES, Block.SAND, Block.PLANKS, Block.GLASS, Block.OBSIDIAN
     };
 
     /** Survival hotbar: block type per slot (AIR = empty). */
